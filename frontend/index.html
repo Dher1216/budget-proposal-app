@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provincial Budget Proposal System</title>
+<link rel="stylesheet" href="css/app.css?v=20260902c">
+</head>
+<body>
+  <div class="center-screen">
+    <div class="login-card">
+      <h1>Budget Proposal System</h1>
+      <p class="sub">Sign in with your assigned username and password.</p>
+      <form id="loginForm">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+        <div class="btn-row">
+          <button type="submit" class="btn" style="width:100%;">Sign in</button>
+        </div>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+      <div class="hint">Viewing without internet only works after you've signed in at least once on this device.</div>
+    </div>
+  </div>
+
+<script src="js/api.js?v=20260902c"></script>
+<script>
+  // If already logged in, skip straight to the right screen.
+  if (getToken()) {
+    window.location.href = getRole() === "admin" ? "/app/admin.html" : "/app/client.html";
+  }
+
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    const errorEl = document.getElementById("errorMsg");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(API_BASE + "/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Login failed");
+      }
+      const data = await res.json();
+      saveSession(data);
+      window.location.href = data.role === "admin" ? "/app/admin.html" : "/app/client.html";
+    } catch (err) {
+      errorEl.textContent = err.message || "Could not sign in. Check your connection.";
+    }
+  });
+</script>
+</body>
+</html>

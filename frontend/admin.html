@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Budget Proposal System</title>
+<link rel="stylesheet" href="css/app.css?v=20260902c">
+</head>
+<body>
+  <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
+  <div class="topbar">
+    <div class="brand">Budget Proposal System · Admin</div>
+    <div class="user-info">
+      <span id="whoami"></span>
+      <span class="logout-link" onclick="logout()">Sign out</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="proposals">Proposals</button>
+    <button class="tab-btn" data-tab="reports">Reports</button>
+    <button class="tab-btn" data-tab="accounts">Accounts</button>
+    <button class="tab-btn" data-tab="funding">Funding</button>
+    <button class="tab-btn" data-tab="offices">Offices</button>
+    <button class="tab-btn" data-tab="users">Users</button>
+  </div>
+
+  <!-- ================= PROPOSALS TAB (approve amounts) ================= -->
+  <div class="tab-panel active" id="tab-proposals">
+    <div class="panel">
+      <div class="filter-row">
+        <div class="field">
+          <label>Budget type</label>
+          <select id="p_type">
+            <option value="annual">Annual</option>
+            <option value="supplemental">Supplemental</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Office</label>
+          <select id="p_office"></select>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="p_year" value="2027">
+        </div>
+        <div class="field" id="p_supplementalField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="p_supplementalNumber" value="1" min="1">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="p_load">Load proposal</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="p_result" style="display:none;">
+      <div class="balance-panel" id="p_balancePanel"></div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <strong id="p_officeTitle"></strong>
+          <span class="badge" id="p_statusBadge"></span>
+          <span class="badge" id="p_approvalBadge"></span>
+        </div>
+        <div>
+          <button class="btn secondary" id="p_reopenBtn">Reopen for office editing</button>
+          <button class="btn secondary" id="p_reopenApprovalBtn" style="display:none;">Reopen approved amounts</button>
+          <button class="btn" id="p_approveBtn">Save approved amounts</button>
+        </div>
+      </div>
+      <p class="hint" id="p_approvalNote"></p>
+      <div class="table-scroll-hint">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
+      <div class="table-wrap" style="margin-top:6px;">
+        <table class="data-table" id="p_table"></table>
+      </div>
+      <div class="status-msg" id="p_status"></div>
+      <div class="audit-log" id="p_auditLog"></div>
+    </div>
+  </div>
+
+  <!-- ================= REPORTS TAB (view + download) ================= -->
+  <div class="tab-panel" id="tab-reports">
+    <div class="panel">
+      <div class="filter-row">
+        <div class="field">
+          <label>Budget type</label>
+          <select id="r_type">
+            <option value="annual">Annual</option>
+            <option value="supplemental">Supplemental</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Office</label>
+          <select id="r_office"></select>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="r_year" value="2027">
+        </div>
+        <div class="field" id="r_supplementalField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="r_supplementalNumber" value="1" min="1">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="r_load">Load report</button>
+        </div>
+        <div class="field">
+          <button class="btn" id="r_download">Download Excel</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel" id="r_result" style="display:none;">
+      <div class="balance-panel" id="r_balancePanel"></div>
+      <strong id="r_officeTitle"></strong>
+      <div class="table-scroll-hint">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
+      <div class="table-wrap" style="margin-top:6px;">
+        <table class="data-table" id="r_table"></table>
+      </div>
+      <div class="audit-log" id="r_auditLog"></div>
+    </div>
+  </div>
+
+  <!-- ================= ACCOUNTS TAB ================= -->
+  <div class="tab-panel" id="tab-accounts">
+    <div class="panel">
+      <h3 style="margin-top:0;">Add account</h3>
+      <div class="filter-row">
+        <div class="field">
+          <label>Classification</label>
+          <select id="a_classification">
+            <option value="PS">Personal Services</option>
+            <option value="MOOE">Maintenance and Other Operating Expenditures</option>
+            <option value="CO">Capital Outlay</option>
+            <option value="FE">Financial Expenses</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Account code</label>
+          <input type="text" id="a_code" placeholder="e.g. 50203010">
+        </div>
+        <div class="field" style="flex:2;">
+          <label>Account name</label>
+          <input type="text" id="a_name" placeholder="e.g. Office Supplies Expenses">
+        </div>
+        <div class="field">
+          <button class="btn" id="a_add">Add account</button>
+        </div>
+      </div>
+      <div class="status-msg" id="a_status"></div>
+    </div>
+    <div class="panel">
+      <div class="filter-row" style="margin-bottom:10px;">
+        <div class="field">
+          <label>Filter by classification</label>
+          <select id="a_filter">
+            <option value="">All</option>
+            <option value="PS">Personal Services</option>
+            <option value="MOOE">MOOE</option>
+            <option value="CO">Capital Outlay</option>
+            <option value="FE">Financial Expenses</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="a_table"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= FUNDING TAB ================= -->
+  <div class="tab-panel" id="tab-funding">
+    <div class="panel">
+      <div class="filter-row">
+        <div class="field">
+          <label>Budget type</label>
+          <select id="f_type">
+            <option value="annual">Annual</option>
+            <option value="supplemental">Supplemental</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="f_year" value="2027">
+        </div>
+        <div class="field" id="f_supplementalField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="f_supplementalNumber" value="1" min="1">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="f_load">Load fund sources</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="f_result" style="display:none;">
+      <div class="balance-panel" id="f_balancePanel"></div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <h3 style="margin:0;">Fund sources for this cycle</h3>
+        <button class="btn secondary" id="f_seedStandard">Add standard fund sources</button>
+      </div>
+      <p class="hint">Adds the province's usual income line items (RPT, Business Tax, IRA, etc.) at ₱0 so you only have to fill in amounts. Skips any already added here.</p>
+
+      <h3>Add a new/one-off source</h3>
+      <div class="filter-row">
+        <div class="field" style="flex:2;">
+          <label>Category</label>
+          <input type="text" id="f_category" list="f_categoryOptions" placeholder="e.g. Local Sources - Tax Revenue">
+          <datalist id="f_categoryOptions"></datalist>
+        </div>
+        <div class="field" style="flex:2;">
+          <label>Particulars (source name)</label>
+          <input type="text" id="f_particulars" placeholder="e.g. Real Property Tax (RPT)">
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="number" step="0.01" id="f_amount" placeholder="0.00">
+        </div>
+        <div class="field">
+          <button class="btn" id="f_add">Add source</button>
+        </div>
+      </div>
+      <div class="status-msg" id="f_status"></div>
+
+      <div class="table-wrap" style="margin-top:14px;">
+        <table class="data-table" id="f_table"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OFFICES TAB ================= -->
+  <div class="tab-panel" id="tab-offices">
+    <div class="panel">
+      <h3 style="margin-top:0;">Add office</h3>
+      <div class="filter-row">
+        <div class="field" style="flex:2;">
+          <label>Office name</label>
+          <input type="text" id="o_name" placeholder="e.g. Office of the Provincial Governor">
+        </div>
+        <div class="field">
+          <label>Office code</label>
+          <input type="text" id="o_code" placeholder="e.g. 1000 1 01 001">
+        </div>
+        <div class="field" style="flex:2;">
+          <label>Sector</label>
+          <input type="text" id="o_sector" placeholder="e.g. General Public Services">
+        </div>
+        <div class="field">
+          <button class="btn" id="o_add">Add office</button>
+        </div>
+      </div>
+      <div class="status-msg" id="o_status"></div>
+    </div>
+    <div class="panel">
+      <ul class="simple-list" id="o_list"></ul>
+    </div>
+  </div>
+
+  <!-- ================= USERS TAB ================= -->
+  <div class="tab-panel" id="tab-users">
+    <div class="panel">
+      <h3 style="margin-top:0;">Add user</h3>
+      <div class="filter-row">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="u_username">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="text" id="u_password">
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <select id="u_role">
+            <option value="client">Client (office)</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="field" id="u_officeField">
+          <label>Office</label>
+          <select id="u_office"></select>
+        </div>
+        <div class="field">
+          <button class="btn" id="u_add">Add user</button>
+        </div>
+      </div>
+      <div class="status-msg" id="u_status"></div>
+    </div>
+    <div class="panel">
+      <ul class="simple-list" id="u_list"></ul>
+    </div>
+  </div>
+
+<script src="js/api.js?v=20260902c"></script>
+<script src="js/admin.js?v=20260902c"></script>
+</body>
+</html>

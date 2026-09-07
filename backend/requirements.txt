@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+passlib==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+openpyxl==3.1.5
+python-multipart==0.0.9
+
+# psycopg2-binary is ONLY needed when connecting to Postgres (e.g. Neon) for
+# production deployment -- NOT for local testing, which uses SQLite by
+# default. It's deliberately left out of this file because some Windows
+# Python versions don't have a pre-built wheel for it, which can make local
+# `pip install -r requirements.txt` fail with a "pg_config not found" error
+# for no reason (you don't need it yet). See the README's deployment
+# section for exactly when/how to add it.
