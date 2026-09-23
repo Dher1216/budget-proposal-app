@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Proposal — Office Portal</title>
+<link rel="stylesheet" href="css/app.css?v=20260922">
+</head>
+<body>
+  <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. You'll need a connection to save or submit.</div>
+  <div class="topbar">
+    <div class="brand">Budget Proposal System</div>
+    <div class="user-info">
+      <span id="whoami"></span>
+      <span class="logout-link" onclick="logout()">Sign out</span>
+    </div>
+  </div>
+
+  <div class="tab-panel active" style="padding:20px; max-width:1200px; margin:0 auto;">
+    <div class="panel">
+      <div class="filter-row">
+        <div class="field">
+          <label>Budget type</label>
+          <select id="c_type">
+            <option value="annual">Annual</option>
+            <option value="supplemental">Supplemental</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="c_year" value="2027">
+        </div>
+        <div class="field" id="c_supplementalField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="c_supplementalNumber" value="1" min="1">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="c_load">Load proposal</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="c_result" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <strong id="c_title"></strong>
+          <span class="badge" id="c_statusBadge"></span>
+        </div>
+        <div>
+          <button class="btn secondary" id="c_saveBtn">Save draft</button>
+          <button class="btn" id="c_submitBtn">Submit proposal</button>
+          <button class="btn secondary" id="c_editBtn" style="display:none;">Edit this proposal</button>
+          <button class="btn secondary" id="c_addSupplementalBtn" title="Add another current-year supplemental reference column">+ Add current-year supplemental column</button>
+          <button class="btn secondary" id="c_downloadBtn">Download Excel</button>
+        </div>
+      </div>
+      <p class="hint" id="c_lockNote" style="display:none;">This proposal has been submitted. Click "Edit this proposal" if you need to make corrections — it stays the same proposal (no duplicate is created), it just reopens for editing.</p>
+      <div class="table-scroll-hint">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
+      <div class="table-wrap" style="margin-top:6px;">
+        <table class="data-table" id="c_table"></table>
+      </div>
+      <div class="status-msg" id="c_status"></div>
+    </div>
+  </div>
+
+<script src="js/api.js?v=20260922"></script>
+<script src="js/client.js?v=20260922"></script>
+</body>
+</html>
