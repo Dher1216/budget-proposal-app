@@ -239,6 +239,21 @@ table.data-table tbody tr:not(.section-row):not(.subtotal-row):hover td{
   gap:16px;
   margin-bottom:10px;
 }
+.report-heading-main{
+  font-family:var(--font-display, inherit);
+  font-size:26px;
+  font-weight:800;
+  letter-spacing:0.02em;
+  color:var(--ink);
+  line-height:1.15;
+  text-transform:uppercase;
+}
+.report-heading-sub{
+  font-size:15px;
+  color:var(--muted);
+  margin-top:4px;
+  font-weight:600;
+}
 
 @media print{
   .no-print, .topbar, .tabs, .filter-row, .btn, button{ display:none !important; }

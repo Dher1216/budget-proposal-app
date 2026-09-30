@@ -367,6 +367,12 @@ async function loadAuditLog(proposalId, containerId) {
   }
 }
 
+function formalBudgetHeading(budgetType, supplementalNumber, year) {
+  return budgetType === "supplemental"
+    ? `SUPPLEMENTAL BUDGET NO. ${supplementalNumber} ${year}`
+    : `ANNUAL BUDGET ${year}`;
+}
+
 document.getElementById("p_load").addEventListener("click", async () => {
   const office_id = document.getElementById("p_office").value;
   const year = document.getElementById("p_year").value;
@@ -382,7 +388,8 @@ document.getElementById("p_load").addEventListener("click", async () => {
     currentProposal = data;
     document.getElementById("p_result").style.display = "block";
     const label = budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
-    document.getElementById("p_officeTitle").textContent = `${data.office_name} — ${label} ${year}`;
+    document.getElementById("p_titleMain").textContent = formalBudgetHeading(data.budget_type, data.supplemental_number, year);
+    document.getElementById("p_titleSub").textContent = data.office_name;
     setOfficeLogo("p_officeLogo", data.office_id);
 
     const statusBadge = document.getElementById("p_statusBadge");
@@ -509,7 +516,8 @@ document.getElementById("r_load").addEventListener("click", async () => {
     const label = budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
     const approvalText = data.approval_status === "approved" ? "Approved" : "Pending approval";
     const statusText = data.status === "submitted" ? "Submitted" : "Draft";
-    document.getElementById("r_officeTitle").textContent = `${data.office_name} — ${label} ${year} (${statusText} · ${approvalText})`;
+    document.getElementById("r_titleMain").textContent = formalBudgetHeading(data.budget_type, data.supplemental_number, year);
+    document.getElementById("r_titleSub").textContent = `${data.office_name} — ${statusText} · ${approvalText}`;
     setOfficeLogo("r_officeLogo", data.office_id);
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("r_table").innerHTML =
@@ -655,24 +663,82 @@ document.getElementById("u_role").addEventListener("change", (e) => {
   document.getElementById("u_officeField").style.display = e.target.value === "client" ? "block" : "none";
 });
 
+let USERS_CACHE = [];
+let resettingPasswordFor = null;
+
 async function loadUsers() {
   try {
     const { data } = await apiGet("/api/users", { cacheable: true });
-    const list = document.getElementById("u_list");
-    list.innerHTML = data.map(u => `
-      <li>
-        <span>${u.username} — ${u.role}${u.office_name ? " (" + u.office_name + ")" : ""}</span>
-        ${u.username === "Dher" ? "" : `<button class="btn danger" data-id="${u.id}" style="padding:4px 10px;">Remove</button>`}
-      </li>
-    `).join("");
-    list.querySelectorAll("button[data-id]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("Remove this user?")) return;
-        await apiDelete(`/api/users/${btn.dataset.id}`);
-        loadUsers();
-      });
-    });
+    USERS_CACHE = data;
+    renderUsersList();
   } catch (err) { console.error(err); }
+}
+
+function renderUsersList() {
+  const list = document.getElementById("u_list");
+  list.innerHTML = USERS_CACHE.map(u => {
+    const isResetting = resettingPasswordFor === u.id;
+    const resetRow = isResetting ? `
+      <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+        <input type="text" id="reset-pw-${u.id}" placeholder="New password" style="width:160px;">
+        <button class="btn secondary" style="padding:4px 10px;" onclick="saveNewPassword(${u.id})">Save</button>
+        <button class="btn secondary" style="padding:4px 10px;" onclick="cancelPasswordReset()">Cancel</button>
+      </div>` : "";
+    return `
+      <li style="flex-direction:column; align-items:stretch;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>${u.username} — ${u.role}${u.office_name ? " (" + u.office_name + ")" : ""}</span>
+          <div>
+            <button class="btn secondary" style="padding:4px 10px;" onclick="startPasswordReset(${u.id})">Reset password</button>
+            ${u.username === "Dher" ? "" : `<button class="btn danger" data-id="${u.id}" style="padding:4px 10px;">Remove</button>`}
+          </div>
+        </div>
+        ${resetRow}
+      </li>
+    `;
+  }).join("");
+  list.querySelectorAll("button[data-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remove this user?")) return;
+      await apiDelete(`/api/users/${btn.dataset.id}`);
+      loadUsers();
+    });
+  });
+  if (resettingPasswordFor) {
+    const input = document.getElementById(`reset-pw-${resettingPasswordFor}`);
+    if (input) input.focus();
+  }
+}
+
+function startPasswordReset(userId) {
+  resettingPasswordFor = userId;
+  renderUsersList();
+}
+
+function cancelPasswordReset() {
+  resettingPasswordFor = null;
+  renderUsersList();
+}
+
+async function saveNewPassword(userId) {
+  const input = document.getElementById(`reset-pw-${userId}`);
+  const statusEl = document.getElementById("u_status");
+  const newPassword = input.value;
+  if (!newPassword || newPassword.length < 4) {
+    statusEl.textContent = "Password must be at least 4 characters.";
+    statusEl.className = "status-msg error";
+    return;
+  }
+  try {
+    await apiPut(`/api/users/${userId}/password`, { new_password: newPassword });
+    statusEl.textContent = "Password updated. Let this user know their new password directly — it can't be shown again after this.";
+    statusEl.className = "status-msg ok";
+    resettingPasswordFor = null;
+    renderUsersList();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
 }
 
 document.getElementById("u_add").addEventListener("click", async () => {
@@ -786,10 +852,9 @@ function renderFundTable(sources) {
       rows += `<tr>
         <td>${s.particulars}</td>
         <td class="num">
-          <input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" class="fund-amount-input" data-id="${s.id}" value="${money(s.amount)}">
+          <input type="text" inputmode="decimal" oninput="formatMoneyInput(this); recomputeLiveSpaPreview();" class="fund-amount-input" data-id="${s.id}" data-category="${cat}" value="${money(s.amount)}">
         </td>
         <td>
-          <button class="btn secondary" style="padding:4px 10px;" onclick="saveFundAmount(${s.id})">Save</button>
           <button class="btn danger" style="padding:4px 10px;" onclick="deleteFundSource(${s.id})">Delete</button>
         </td>
       </tr>`;
@@ -799,18 +864,59 @@ function renderFundTable(sources) {
   table.innerHTML = "<thead><tr><th>Particulars</th><th class='num'>Amount</th><th>Actions</th></tr></thead><tbody>" + rows + "</tbody>";
 }
 
-async function saveFundAmount(id) {
-  const input = document.querySelector(`.fund-amount-input[data-id="${id}"]`);
+async function saveAllFundAmounts() {
   const statusEl = document.getElementById("f_status");
+  const inputs = document.querySelectorAll(".fund-amount-input");
+  if (!inputs.length) return;
+  const items = Array.from(inputs).map(inp => ({ id: Number(inp.dataset.id), amount: parseMoney(inp.value) }));
   try {
-    await apiPut(`/api/fund-sources/${id}`, { amount: parseMoney(input.value) });
-    statusEl.textContent = "Amount saved.";
+    await apiPut("/api/fund-sources/bulk-update", { items });
+    statusEl.textContent = `Saved ${items.length} fund source amount(s).`;
     statusEl.className = "status-msg ok";
     document.getElementById("f_load").click();
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.className = "status-msg error";
   }
+}
+
+document.getElementById("f_saveAll").addEventListener("click", saveAllFundAmounts);
+
+// Mirrors the backend's exact SPA formulas (see main.py _compute_dev_fund_20pct /
+// _compute_ldrrmf_5pct) so the two auto-computed deductions update live as
+// amounts are typed, before anything is saved. Purely a preview -- the
+// authoritative values still come from the server after saving.
+function recomputeLiveSpaPreview() {
+  const spaTable = document.getElementById("spa_table");
+  if (!spaTable || !spaTable.innerHTML.trim()) return; // SPA panel not loaded yet
+
+  const byCategory = {};
+  document.querySelectorAll(".fund-amount-input").forEach(inp => {
+    const cat = inp.dataset.category;
+    byCategory[cat] = (byCategory[cat] || 0) + parseMoney(inp.value);
+  });
+
+  const nta = byCategory["External Sources - IRA / National Tax Allocation"] || 0;
+  const devFund = Math.round(nta * 0.20 * 100) / 100;
+
+  const ldrrmfBase =
+    (byCategory["Local Sources - Tax Revenue"] || 0) +
+    (byCategory["Local Sources - Non-Tax Revenue"] || 0) +
+    (byCategory["External Sources - IRA / National Tax Allocation"] || 0) +
+    (byCategory["External Sources - Other Shares"] || 0) +
+    (byCategory["Non-Income Receipts"] || 0);
+  const ldrrmf = Math.round(ldrrmfBase * 0.05 * 100) / 100;
+
+  const rows = spaTable.querySelectorAll("tbody tr");
+  rows.forEach(row => {
+    const label = row.children[0] && row.children[0].textContent;
+    if (!label) return;
+    if (label.includes("20% Development Fund")) {
+      row.children[1].innerHTML = `${money(devFund)} <span class="hint" style="margin:0;">(live preview — unsaved)</span>`;
+    } else if (label.includes("5% LDRRMF")) {
+      row.children[1].innerHTML = `${money(ldrrmf)} <span class="hint" style="margin:0;">(live preview — unsaved)</span>`;
+    }
+  });
 }
 
 document.getElementById("f_load").addEventListener("click", async () => {
@@ -1075,18 +1181,44 @@ document.getElementById("s_load").addEventListener("click", async () => {
     const { data } = await apiGet(path, { cacheable: true });
     currentSummary = data;
     document.getElementById("s_result").style.display = "block";
-    const label = budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
-    document.getElementById("s_title").textContent = `${label} ${year} — ${data.offices_count} office(s) with a proposal`;
+    document.getElementById("s_titleMain").textContent = formalBudgetHeading(budget_type, data.supplemental_number, year);
+    document.getElementById("s_titleSub").textContent = `All Offices — ${data.offices_count} office(s) with a proposal`;
     const sLogo = document.getElementById("s_logo");
     sLogo.onload = () => { sLogo.style.display = "block"; };
     sLogo.onerror = () => { sLogo.style.display = "none"; };
     sLogo.src = `/api/branding/default-logo?t=${Date.now()}`;
     document.getElementById("s_table").innerHTML = summaryTableHeader() + "<tbody>" + buildSummaryRows(data.rows) + "</tbody>";
     loadBalance(year, budget_type, supp, "s_balancePanel");
+
+    let fsPath = `/api/fund-sources?year=${year}&budget_type=${budget_type}`;
+    if (budget_type === "supplemental") fsPath += `&supplemental_number=${supp}`;
+    const { data: fundSources } = await apiGet(fsPath, { cacheable: true });
+    renderSummaryFundTable(fundSources);
   } catch (err) {
     alert(err.message);
   }
 });
+
+function renderSummaryFundTable(sources) {
+  const table = document.getElementById("s_fundTable");
+  if (!sources.length) {
+    table.innerHTML = "<thead><tr><th>Category</th><th>Particulars</th><th class='num'>Amount</th></tr></thead><tbody><tr><td colspan='3'>No fund sources recorded for this budget cycle.</td></tr></tbody>";
+    return;
+  }
+  const byCategory = {};
+  sources.forEach(s => { (byCategory[s.category] ||= []).push(s); });
+  let total = 0;
+  let rows = "";
+  Object.keys(byCategory).sort().forEach(cat => {
+    rows += `<tr class="section-row"><td colspan="3">${cat}</td></tr>`;
+    byCategory[cat].forEach(s => {
+      total += s.amount;
+      rows += `<tr><td></td><td>${s.particulars}</td><td class="num">${money(s.amount)}</td></tr>`;
+    });
+  });
+  rows += `<tr class="subtotal-row"><td colspan="2">Total Available Budget</td><td class="num">${money(total)}</td></tr>`;
+  table.innerHTML = "<thead><tr><th>Category</th><th>Particulars</th><th class='num'>Amount</th></tr></thead><tbody>" + rows + "</tbody>";
+}
 
 document.getElementById("s_download").addEventListener("click", async () => {
   const year = document.getElementById("s_year").value;

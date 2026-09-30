@@ -45,6 +45,10 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
+class PasswordResetRequest(BaseModel):
+    new_password: str
+
+
 class AccountCreate(BaseModel):
     classification: str           # "PS" | "MOOE" | "CO" | "FE"
     code: str
@@ -175,6 +179,15 @@ class FundSourceUpdate(BaseModel):
     category: Optional[str] = None
     particulars: Optional[str] = None
     amount: Optional[float] = None
+
+
+class FundSourceBulkUpdateItem(BaseModel):
+    id: int
+    amount: float
+
+
+class FundSourceBulkUpdateRequest(BaseModel):
+    items: List[FundSourceBulkUpdateItem]
 
 
 class FundSourceOut(BaseModel):

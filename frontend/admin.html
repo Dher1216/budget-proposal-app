@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261001">
+<link rel="stylesheet" href="css/app.css?v=20261002">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -62,7 +62,8 @@
         <div style="display:flex; align-items:center; gap:12px;">
           <img id="p_officeLogo" class="header-logo" alt="" style="display:none;">
           <div>
-            <strong id="p_officeTitle"></strong>
+            <div class="report-heading-main" id="p_titleMain"></div>
+            <div class="report-heading-sub" id="p_titleSub"></div>
             <span class="badge" id="p_statusBadge"></span>
             <span class="badge" id="p_approvalBadge"></span>
           </div>
@@ -123,7 +124,10 @@
       <div id="r_printArea">
         <div class="report-header">
           <img id="r_officeLogo" class="header-logo" alt="" style="display:none;">
-          <strong id="r_officeTitle"></strong>
+          <div>
+            <div class="report-heading-main" id="r_titleMain"></div>
+            <div class="report-heading-sub" id="r_titleSub"></div>
+          </div>
         </div>
         <div class="table-wrap" style="margin-top:6px;">
           <table class="data-table" id="r_table"></table>
@@ -168,9 +172,19 @@
       <div class="balance-panel" id="s_balancePanel"></div>
       <div class="report-header">
         <img id="s_logo" class="header-logo" alt="" style="display:none;">
-        <strong id="s_title"></strong>
+        <div>
+          <div class="report-heading-main" id="s_titleMain"></div>
+          <div class="report-heading-sub" id="s_titleSub"></div>
+        </div>
       </div>
-      <div class="table-wrap" style="margin-top:14px;">
+
+      <h3 style="margin-bottom:6px;">Fund Sources (Receipts)</h3>
+      <div class="table-wrap" style="margin-bottom:20px;">
+        <table class="data-table" id="s_fundTable"></table>
+      </div>
+
+      <h3 style="margin-bottom:6px;">Expenditures (by Account)</h3>
+      <div class="table-wrap">
         <table class="data-table" id="s_table"></table>
       </div>
     </div>
@@ -278,7 +292,10 @@
       </div>
       <div class="status-msg" id="f_status"></div>
 
-      <div class="table-wrap" style="margin-top:14px;">
+      <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+        <button class="btn" id="f_saveAll">Save all amounts</button>
+      </div>
+      <div class="table-wrap" style="margin-top:6px;">
         <table class="data-table" id="f_table"></table>
       </div>
     </div>
@@ -499,7 +516,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261001"></script>
-<script src="js/admin.js?v=20261001"></script>
+<script src="js/api.js?v=20261002"></script>
+<script src="js/admin.js?v=20261002"></script>
 </body>
 </html>

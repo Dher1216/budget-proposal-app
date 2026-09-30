@@ -159,8 +159,11 @@ function renderProposal(data, fromCache) {
   currentProposal = data;
   const editable = data.status === "draft";
   document.getElementById("c_result").style.display = "block";
-  const typeLabel = data.budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
-  document.getElementById("c_title").textContent = `${typeLabel} proposal — ${document.getElementById("c_year").value}`;
+  const typeLabel = data.budget_type === "supplemental"
+    ? `SUPPLEMENTAL BUDGET NO. ${data.supplemental_number} ${document.getElementById("c_year").value}`
+    : `ANNUAL BUDGET ${document.getElementById("c_year").value}`;
+  document.getElementById("c_titleMain").textContent = typeLabel;
+  document.getElementById("c_titleSub").textContent = getOfficeName();
   const officeLogo = document.getElementById("c_officeLogo");
   officeLogo.onload = () => { officeLogo.style.display = "block"; };
   officeLogo.onerror = () => { officeLogo.style.display = "none"; };

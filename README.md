@@ -85,6 +85,19 @@ proposals across offices, then exporting the final report to Excel.
   ending balance, all in one document. Note: unlike the original government
   template, this doesn't split the current year into semesters (Actual/
   Estimate) — the app only tracks a single current-year total.
+- **Fund source editing** — all amounts save together via one "Save all
+  amounts" button, so editing several rows and saving once can never wipe
+  another row's unsaved edit. The two auto-computed SPA deductions also
+  show a live preview as you type, before you save anything.
+- **Summary Report now shows Fund Sources** alongside Expenditures.
+- **Formal report headings** — Proposals, Reports, Summary Report, and the
+  office's own view now show a proper heading (e.g. "ANNUAL BUDGET 2027")
+  with the office name as a subtitle, instead of one small line of text.
+- **Password reset** (Users tab) — admin can set a new password for any
+  user at any time. Note: there's no way to view a user's *existing*
+  password — passwords are stored as one-way hashes (the secure standard),
+  which can't be reversed into the original text. Resetting to a new known
+  password is the secure equivalent.
 
 ## Running it locally (to try it out)
 

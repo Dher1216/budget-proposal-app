@@ -375,6 +375,25 @@ def delete_user(user_id: int, db: Session = Depends(get_db), admin: models.User 
     return {"ok": True}
 
 
+@app.put("/api/users/{user_id}/password")
+def reset_user_password(user_id: int, payload: schemas.PasswordResetRequest, db: Session = Depends(get_db),
+                         admin: models.User = Depends(require_admin)):
+    """Sets a new password for a user. Note: there is no way to retrieve a
+    user's EXISTING password -- passwords are stored as one-way hashes (the
+    standard, secure way), which can never be reversed back into the
+    original text, by design. Setting a new one is the secure equivalent of
+    'knowing' a user's password: whatever admin sets it to here IS the
+    password from that point on."""
+    u = db.query(models.User).get(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    if len(payload.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
+    u.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- accounts --
 
 @app.get("/api/accounts", response_model=List[schemas.AccountOut])
@@ -838,6 +857,24 @@ def create_fund_source(payload: schemas.FundSourceCreate, db: Session = Depends(
     db.commit()
     db.refresh(fs)
     return fs
+
+
+@app.put("/api/fund-sources/bulk-update", response_model=List[schemas.FundSourceOut])
+def bulk_update_fund_sources(payload: schemas.FundSourceBulkUpdateRequest, db: Session = Depends(get_db),
+                              admin: models.User = Depends(require_admin)):
+    """Saves every edited fund source amount in one request/transaction, so
+    editing several rows and saving once doesn't risk any row's unsaved
+    edit being wiped by a reload triggered by saving a different row."""
+    updated = []
+    for item in payload.items:
+        fs = db.query(models.FundSource).get(item.id)
+        if fs:
+            fs.amount = item.amount
+            updated.append(fs)
+    db.commit()
+    for fs in updated:
+        db.refresh(fs)
+    return updated
 
 
 @app.put("/api/fund-sources/{source_id}", response_model=schemas.FundSourceOut)
