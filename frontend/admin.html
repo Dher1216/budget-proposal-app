@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20260922">
+<link rel="stylesheet" href="css/app.css?v=20260930">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -59,10 +59,13 @@
     <div class="panel" id="p_result" style="display:none;">
       <div class="balance-panel" id="p_balancePanel"></div>
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <div>
-          <strong id="p_officeTitle"></strong>
-          <span class="badge" id="p_statusBadge"></span>
-          <span class="badge" id="p_approvalBadge"></span>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img id="p_officeLogo" class="header-logo" alt="" style="display:none;">
+          <div>
+            <strong id="p_officeTitle"></strong>
+            <span class="badge" id="p_statusBadge"></span>
+            <span class="badge" id="p_approvalBadge"></span>
+          </div>
         </div>
         <div>
           <button class="btn secondary" id="p_reopenBtn">Reopen for office editing</button>
@@ -110,16 +113,24 @@
         <div class="field">
           <button class="btn" id="r_download">Download Excel</button>
         </div>
+        <div class="field">
+          <button class="btn secondary" id="r_print">Print</button>
+        </div>
       </div>
     </div>
     <div class="panel" id="r_result" style="display:none;">
-      <div class="balance-panel" id="r_balancePanel"></div>
-      <strong id="r_officeTitle"></strong>
-      <div class="table-scroll-hint">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
-      <div class="table-wrap" style="margin-top:6px;">
-        <table class="data-table" id="r_table"></table>
+      <div class="balance-panel no-print" id="r_balancePanel"></div>
+      <div id="r_printArea">
+        <div class="report-header">
+          <img id="r_officeLogo" class="header-logo" alt="" style="display:none;">
+          <strong id="r_officeTitle"></strong>
+        </div>
+        <div class="table-wrap" style="margin-top:6px;">
+          <table class="data-table" id="r_table"></table>
+        </div>
       </div>
-      <div class="audit-log" id="r_auditLog"></div>
+      <div class="table-scroll-hint no-print">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
+      <div class="audit-log no-print" id="r_auditLog"></div>
     </div>
   </div>
 
@@ -152,7 +163,10 @@
     </div>
     <div class="panel" id="s_result" style="display:none;">
       <div class="balance-panel" id="s_balancePanel"></div>
-      <strong id="s_title"></strong>
+      <div class="report-header">
+        <img id="s_logo" class="header-logo" alt="" style="display:none;">
+        <strong id="s_title"></strong>
+      </div>
       <div class="table-wrap" style="margin-top:14px;">
         <table class="data-table" id="s_table"></table>
       </div>
@@ -253,7 +267,7 @@
         </div>
         <div class="field">
           <label>Amount</label>
-          <input type="number" step="0.01" id="f_amount" placeholder="0.00">
+          <input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" id="f_amount" placeholder="0.00">
         </div>
         <div class="field">
           <button class="btn" id="f_add">Add source</button>
@@ -331,6 +345,37 @@
       </div>
       <div class="status-msg" id="o_status"></div>
     </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">App-wide logos</h3>
+      <p class="hint">The default logo (usually the province seal) is shown on the login screen and used automatically for any office that hasn't uploaded its own logo.</p>
+      <div class="two-col">
+        <div>
+          <label>Login screen logo</label>
+          <div class="logo-preview-row">
+            <img id="brand_loginPreview" class="logo-preview" alt="" style="display:none;">
+            <div>
+              <input type="file" id="brand_loginFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none;">
+              <button class="btn secondary" onclick="document.getElementById('brand_loginFile').click()">Upload</button>
+              <button class="btn danger" id="brand_loginRemove">Remove</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label>Default / province logo</label>
+          <div class="logo-preview-row">
+            <img id="brand_defaultPreview" class="logo-preview" alt="" style="display:none;">
+            <div>
+              <input type="file" id="brand_defaultFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none;">
+              <button class="btn secondary" onclick="document.getElementById('brand_defaultFile').click()">Upload</button>
+              <button class="btn danger" id="brand_defaultRemove">Remove</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="status-msg" id="brand_status"></div>
+    </div>
+
     <div class="panel">
       <ul class="simple-list" id="o_list"></ul>
     </div>
@@ -415,7 +460,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20260922"></script>
-<script src="js/admin.js?v=20260922"></script>
+<script src="js/api.js?v=20260930"></script>
+<script src="js/admin.js?v=20260930"></script>
 </body>
 </html>

@@ -7,9 +7,35 @@ Seeds the database with:
 Run once: `python seed_data.py`
 Safe to re-run -- it skips anything that already exists.
 """
+from sqlalchemy import text, inspect
 from database import SessionLocal, engine, Base
 import models
 from auth import hash_password
+
+
+def ensure_new_columns():
+    """create_all() only creates tables that don't exist yet -- it never
+    alters an EXISTING table to add new columns. That's fine for a fresh
+    local SQLite file (always rebuilt from scratch), but it's a real problem
+    for a live production database (Neon) that already has real data in
+    tables like 'offices' from before these columns existed. This adds any
+    missing columns safely, without touching existing data, and does
+    nothing if they're already present (safe to run every deploy)."""
+    inspector = inspect(engine)
+    if "offices" not in inspector.get_table_names():
+        return  # brand new database -- create_all() below will make it correctly from scratch
+
+    existing_cols = {c["name"] for c in inspector.get_columns("offices")}
+    is_postgres = engine.dialect.name == "postgresql"
+    blob_type = "BYTEA" if is_postgres else "BLOB"
+
+    with engine.begin() as conn:
+        if "logo_data" not in existing_cols:
+            conn.execute(text(f"ALTER TABLE offices ADD COLUMN logo_data {blob_type}"))
+            print("Migration: added offices.logo_data")
+        if "logo_content_type" not in existing_cols:
+            conn.execute(text("ALTER TABLE offices ADD COLUMN logo_content_type VARCHAR"))
+            print("Migration: added offices.logo_content_type")
 
 # classification, code, name
 ACCOUNTS = [
@@ -144,6 +170,7 @@ ACCOUNTS = [
 
 
 def run():
+    ensure_new_columns()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:

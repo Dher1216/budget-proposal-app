@@ -151,6 +151,32 @@ function money(n) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Formats a text input as the user types: 1234567 -> 1,234,567 (keeps up to
+// 2 decimal places). Used instead of type="number" so commas are allowed
+// while typing large amounts, which is easy to miscount otherwise.
+function formatMoneyInput(el) {
+  const caretFromEnd = el.value.length - el.selectionStart;
+  let raw = el.value.replace(/[^0-9.\-]/g, "");
+  const negative = raw.startsWith("-");
+  if (negative) raw = raw.slice(1);
+  const firstDot = raw.indexOf(".");
+  let intPart = firstDot === -1 ? raw : raw.slice(0, firstDot);
+  let decPart = firstDot === -1 ? "" : "." + raw.slice(firstDot + 1).replace(/\./g, "").slice(0, 2);
+  intPart = intPart.replace(/^0+(?=\d)/, "");
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  el.value = (negative ? "-" : "") + withCommas + decPart;
+  const pos = Math.max(0, el.value.length - caretFromEnd);
+  el.setSelectionRange(pos, pos);
+}
+
+// Strips commas back out before sending a value to the API.
+function parseMoney(str) {
+  if (str === null || str === undefined) return 0;
+  const cleaned = String(str).replace(/,/g, "").trim();
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
 const CLASSIFICATION_LABELS = {
   PS: "Personal Services",
   MOOE: "Maintenance and Other Operating Expenditures",

@@ -64,6 +64,16 @@ proposals across offices, then exporting the final report to Excel.
   permanently purge an entire old year (type-to-confirm required).
 - **Activity log** — every save, submit, reopen, approval, and admin-field
   change is recorded with who did it and when.
+- **Logos** — admin can upload a login-screen logo, a default/province logo
+  (used as the automatic fallback), and a logo per office (Offices tab).
+  Logos appear on the left side of Proposals, Reports, Summary Report, and
+  the office's own proposal view.
+- **Print button** (Reports tab) — prints a clean copy with the logo and
+  office name at the top, no navigation or buttons.
+- **Comma-formatted number entry** — every amount field displays and accepts
+  commas as you type (e.g. 1,234,567.89) to make large numbers easier to
+  enter correctly; values are still stored as plain numbers.
+- **Supporting documents** — PDF only, capped at 8 MB per file.
 
 ## Running it locally (to try it out)
 

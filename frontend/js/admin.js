@@ -27,13 +27,70 @@ async function loadOfficesIntoSelects() {
   }
 }
 
+function officeLogoUrl(officeId) {
+  return `/api/offices/${officeId}/logo?t=${Date.now()}`;
+}
+
 function renderOfficeList() {
   const list = document.getElementById("o_list");
   if (!OFFICES.length) { list.innerHTML = "<li>No offices yet.</li>"; return; }
-  list.innerHTML = OFFICES.map(o =>
-    `<li><span>${o.name}${o.code ? " — " + o.code : ""}${o.sector ? " (" + o.sector + ")" : ""}</span></li>`
-  ).join("");
+  list.innerHTML = OFFICES.map(o => `
+    <li>
+      <div class="office-row-left">
+        <img class="office-row-logo" src="${officeLogoUrl(o.id)}" alt="" onerror="this.style.visibility='hidden'">
+        <span>${o.name}${o.code ? " — " + o.code : ""}${o.sector ? " (" + o.sector + ")" : ""}</span>
+      </div>
+      <div>
+        <input type="file" id="office-logo-file-${o.id}" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none;" onchange="uploadOfficeLogo(${o.id})">
+        <button class="btn secondary" style="padding:4px 10px;" onclick="document.getElementById('office-logo-file-${o.id}').click()">${o.has_logo ? "Change logo" : "Add logo"}</button>
+        ${o.has_logo ? `<button class="btn danger" style="padding:4px 10px;" onclick="removeOfficeLogo(${o.id})">Remove logo</button>` : ""}
+      </div>
+    </li>
+  `).join("");
 }
+
+async function uploadOfficeLogo(officeId) {
+  const input = document.getElementById(`office-logo-file-${officeId}`);
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("o_status");
+  try {
+    await apiUpload(`/api/offices/${officeId}/logo`, file);
+    statusEl.textContent = "Office logo updated.";
+    statusEl.className = "status-msg ok";
+    await loadOfficesIntoSelects();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+}
+
+async function removeOfficeLogo(officeId) {
+  if (!confirm("Remove this office's logo? It will fall back to the default logo.")) return;
+  const statusEl = document.getElementById("o_status");
+  try {
+    await apiDelete(`/api/offices/${officeId}/logo`);
+    statusEl.textContent = "Office logo removed.";
+    statusEl.className = "status-msg ok";
+    await loadOfficesIntoSelects();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+}
+
+function setOfficeLogo(imgId, officeId) {
+  const img = document.getElementById(imgId);
+  if (!img) return;
+  if (!officeId) { img.style.display = "none"; return; }
+  img.onload = () => { img.style.display = "block"; };
+  img.onerror = () => { img.style.display = "none"; };
+  img.src = officeLogoUrl(officeId);
+}
+
+document.getElementById("r_print").addEventListener("click", () => {
+  window.print();
+});
 
 document.getElementById("o_add").addEventListener("click", async () => {
   const name = document.getElementById("o_name").value.trim();
@@ -48,6 +105,80 @@ document.getElementById("o_add").addEventListener("click", async () => {
     document.getElementById("o_name").value = "";
     document.getElementById("o_code").value = "";
     document.getElementById("o_sector").value = "";
+    await loadOfficesIntoSelects();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+// -------------------------------------------------------------- branding --
+
+function loadBrandingPreviews() {
+  const loginImg = document.getElementById("brand_loginPreview");
+  const defaultImg = document.getElementById("brand_defaultPreview");
+  const bust = Date.now();
+  loginImg.onload = () => { loginImg.style.display = "block"; };
+  loginImg.onerror = () => { loginImg.style.display = "none"; };
+  loginImg.src = `/api/branding/login-logo?t=${bust}`;
+  defaultImg.onload = () => { defaultImg.style.display = "block"; };
+  defaultImg.onerror = () => { defaultImg.style.display = "none"; };
+  defaultImg.src = `/api/branding/default-logo?t=${bust}`;
+}
+
+document.getElementById("brand_loginFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("brand_status");
+  try {
+    await apiUpload("/api/admin/branding/login-logo", file);
+    statusEl.textContent = "Login logo updated.";
+    statusEl.className = "status-msg ok";
+    loadBrandingPreviews();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("brand_defaultFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("brand_status");
+  try {
+    await apiUpload("/api/admin/branding/default-logo", file);
+    statusEl.textContent = "Default logo updated.";
+    statusEl.className = "status-msg ok";
+    loadBrandingPreviews();
+    await loadOfficesIntoSelects(); // offices without their own logo now show the new default
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("brand_loginRemove").addEventListener("click", async () => {
+  if (!confirm("Remove the login screen logo?")) return;
+  const statusEl = document.getElementById("brand_status");
+  try {
+    await apiDelete("/api/admin/branding/login-logo");
+    statusEl.textContent = "Login logo removed.";
+    statusEl.className = "status-msg ok";
+    loadBrandingPreviews();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("brand_defaultRemove").addEventListener("click", async () => {
+  if (!confirm("Remove the default/province logo? Offices without their own logo will show no logo until a new default is set.")) return;
+  const statusEl = document.getElementById("brand_status");
+  try {
+    await apiDelete("/api/admin/branding/default-logo");
+    statusEl.textContent = "Default logo removed.";
+    statusEl.className = "status-msg ok";
+    loadBrandingPreviews();
     await loadOfficesIntoSelects();
   } catch (err) {
     statusEl.textContent = err.message;
@@ -117,15 +248,15 @@ function buildRows(lines, { editableApproved = false, editableAdminFields = fals
       subtotals.approved += (l.approved_amount || 0);
 
       const approvedCell = editableApproved
-        ? `<input type="number" step="0.01" data-account="${l.account_id}" class="approved-input" value="${l.approved_amount ?? ""}">`
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" class="approved-input" value="${l.approved_amount != null ? money(l.approved_amount) : ''}">`
         : (l.approved_amount != null ? money(l.approved_amount) : "—");
 
       const prevCell = editableAdminFields
-        ? `<input type="number" step="0.01" data-account="${l.account_id}" data-field="prev_year_actual" class="admin-field-input" value="${l.prev_year_actual ?? 0}">`
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="prev_year_actual" class="admin-field-input" value="${money(l.prev_year_actual ?? 0)}">`
         : money(l.prev_year_actual);
 
       const adjustedCell = editableAdminFields
-        ? `<input type="number" step="0.01" data-account="${l.account_id}" data-field="adjusted_proposal" class="admin-field-input" value="${l.adjusted_proposal ?? ""}">`
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="adjusted_proposal" class="admin-field-input" value="${l.adjusted_proposal != null ? money(l.adjusted_proposal) : ''}">`
         : (l.adjusted_proposal != null ? money(l.adjusted_proposal) : "—");
 
       const remarksAdjCell = editableAdminFields
@@ -197,13 +328,14 @@ function actionLabel(action) {
 function renderAuditLog(containerId, entries) {
   const el = document.getElementById(containerId);
   if (!entries.length) { el.innerHTML = ""; return; }
-  el.innerHTML = "<h4>Activity</h4>" + entries.map(e => {
+  const items = entries.map(e => {
     const when = new Date(e.timestamp).toLocaleString();
     return `<div class="audit-entry">
       <div><strong>${e.username}</strong> ${actionLabel(e.action)}</div>
       <div class="who-when">${when}${e.detail ? " — " + e.detail : ""}</div>
     </div>`;
   }).join("");
+  el.innerHTML = `<h4>Activity</h4><div class="audit-log-scroll">${items}</div>`;
 }
 
 async function loadAuditLog(proposalId, containerId) {
@@ -231,6 +363,7 @@ document.getElementById("p_load").addEventListener("click", async () => {
     document.getElementById("p_result").style.display = "block";
     const label = budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
     document.getElementById("p_officeTitle").textContent = `${data.office_name} — ${label} ${year}`;
+    setOfficeLogo("p_officeLogo", data.office_id);
 
     const statusBadge = document.getElementById("p_statusBadge");
     statusBadge.textContent = data.status === "submitted" ? "Submitted by office" : "Draft (office still editing)";
@@ -272,7 +405,7 @@ document.getElementById("p_saveAdminFieldsBtn").addEventListener("click", async 
     if (inp.dataset.field === "remarks_adjusted") {
       byAccount[id].remarks_adjusted = inp.value;
     } else {
-      byAccount[id][inp.dataset.field] = inp.value === "" ? null : Number(inp.value);
+      byAccount[id][inp.dataset.field] = inp.value === "" ? null : parseMoney(inp.value);
     }
   });
   try {
@@ -292,7 +425,7 @@ document.getElementById("p_approveBtn").addEventListener("click", async () => {
   const inputs = document.querySelectorAll(".approved-input");
   const lines = Array.from(inputs)
     .filter(inp => inp.value !== "")
-    .map(inp => ({ account_id: Number(inp.dataset.account), approved_amount: Number(inp.value) }));
+    .map(inp => ({ account_id: Number(inp.dataset.account), approved_amount: parseMoney(inp.value) }));
   try {
     await apiPut(`/api/proposal/${currentProposal.id}/approve`, { lines });
     statusEl.textContent = "Approved amounts saved.";
@@ -357,6 +490,7 @@ document.getElementById("r_load").addEventListener("click", async () => {
     const approvalText = data.approval_status === "approved" ? "Approved" : "Pending approval";
     const statusText = data.status === "submitted" ? "Submitted" : "Draft";
     document.getElementById("r_officeTitle").textContent = `${data.office_name} — ${label} ${year} (${statusText} · ${approvalText})`;
+    setOfficeLogo("r_officeLogo", data.office_id);
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("r_table").innerHTML =
       tableHeader(data.year, suppColCount) + "<tbody>" + buildRows(data.lines, { suppColCount }) + "</tbody>";
@@ -558,6 +692,7 @@ function renderBalancePanel(containerId, summary) {
   if (!summary) { el.innerHTML = ""; return; }
   const proposedClass = summary.balance_vs_proposed < 0 ? "negative" : "positive";
   const adjustedClass = summary.balance_vs_adjusted < 0 ? "negative" : "positive";
+  const approvedClass = summary.balance_vs_approved < 0 ? "negative" : "positive";
   el.innerHTML = `
     <div class="balance-item">
       <div class="label">Available Budget</div>
@@ -573,6 +708,11 @@ function renderBalancePanel(containerId, summary) {
       <div class="value">₱${money(summary.total_adjusted)}</div>
     </div>
     ${balanceBlock("Available Balance vs Adjusted Proposal", summary.balance_vs_adjusted, adjustedClass)}
+    <div class="balance-item">
+      <div class="label">Total Approved (All Offices)</div>
+      <div class="value">₱${money(summary.total_approved)}</div>
+    </div>
+    ${balanceBlock("Available Balance vs Approved", summary.balance_vs_approved, approvedClass)}
   `;
 }
 
@@ -622,7 +762,7 @@ function renderFundTable(sources) {
       rows += `<tr>
         <td>${s.particulars}</td>
         <td class="num">
-          <input type="number" step="0.01" class="fund-amount-input" data-id="${s.id}" value="${s.amount}">
+          <input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" class="fund-amount-input" data-id="${s.id}" value="${money(s.amount)}">
         </td>
         <td>
           <button class="btn secondary" style="padding:4px 10px;" onclick="saveFundAmount(${s.id})">Save</button>
@@ -639,7 +779,7 @@ async function saveFundAmount(id) {
   const input = document.querySelector(`.fund-amount-input[data-id="${id}"]`);
   const statusEl = document.getElementById("f_status");
   try {
-    await apiPut(`/api/fund-sources/${id}`, { amount: Number(input.value) });
+    await apiPut(`/api/fund-sources/${id}`, { amount: parseMoney(input.value) });
     statusEl.textContent = "Amount saved.";
     statusEl.className = "status-msg ok";
     document.getElementById("f_load").click();
@@ -671,7 +811,7 @@ document.getElementById("f_add").addEventListener("click", async () => {
   if (!currentFundContext) { statusEl.textContent = "Load a budget cycle first."; statusEl.className = "status-msg error"; return; }
   const category = document.getElementById("f_category").value.trim();
   const particulars = document.getElementById("f_particulars").value.trim();
-  const amount = Number(document.getElementById("f_amount").value);
+  const amount = parseMoney(document.getElementById("f_amount").value);
   if (!category || !particulars || !amount) {
     statusEl.textContent = "Category, particulars, and amount are all required.";
     statusEl.className = "status-msg error";
@@ -726,6 +866,7 @@ async function deleteFundSource(id) {
 
 // ------------------------------------------------------------------ init --
 loadOfficesIntoSelects();
+loadBrandingPreviews();
 loadAccounts();
 loadUsers();
 loadFundCategories();
@@ -799,6 +940,10 @@ document.getElementById("s_load").addEventListener("click", async () => {
     document.getElementById("s_result").style.display = "block";
     const label = budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
     document.getElementById("s_title").textContent = `${label} ${year} — ${data.offices_count} office(s) with a proposal`;
+    const sLogo = document.getElementById("s_logo");
+    sLogo.onload = () => { sLogo.style.display = "block"; };
+    sLogo.onerror = () => { sLogo.style.display = "none"; };
+    sLogo.src = `/api/branding/default-logo?t=${Date.now()}`;
     document.getElementById("s_table").innerHTML = summaryTableHeader() + "<tbody>" + buildSummaryRows(data.rows) + "</tbody>";
     loadBalance(year, budget_type, supp, "s_balancePanel");
   } catch (err) {

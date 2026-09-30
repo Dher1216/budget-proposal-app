@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Provincial Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20260922">
+<link rel="stylesheet" href="css/app.css?v=20260930">
 </head>
 <body>
   <div class="center-screen">
     <div class="login-card">
+      <img id="loginLogo" class="login-logo" alt="" style="display:none;">
       <h1>Budget Proposal System</h1>
       <p class="sub">Sign in with your assigned username and password.</p>
       <form id="loginForm">
@@ -25,7 +26,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20260922"></script>
+<script src="js/api.js?v=20260930"></script>
 <script>
   // If already logged in, skip straight to the right screen.
   if (getToken()) {
@@ -37,6 +38,11 @@
     const errorEl = document.getElementById("errorMsg");
     errorEl.textContent = "Your session expired — please sign in again.";
   }
+
+  const loginLogo = document.getElementById("loginLogo");
+  loginLogo.onload = () => { loginLogo.style.display = "block"; };
+  loginLogo.onerror = () => { loginLogo.style.display = "none"; };
+  loginLogo.src = API_BASE + "/api/branding/login-logo";
 
   document.getElementById("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();

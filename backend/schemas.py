@@ -23,6 +23,7 @@ class OfficeCreate(BaseModel):
 
 class OfficeOut(OfficeCreate):
     id: int
+    has_logo: bool = False
     class Config:
         from_attributes = True
 
@@ -195,8 +196,10 @@ class BudgetSummaryOut(BaseModel):
     available_budget: float
     total_proposed: float
     total_adjusted: float
+    total_approved: float
     balance_vs_proposed: float
     balance_vs_adjusted: float
+    balance_vs_approved: float
 
 
 class CleanupAttachmentsRequest(BaseModel):

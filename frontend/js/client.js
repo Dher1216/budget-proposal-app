@@ -105,7 +105,7 @@ function buildRows(lines, editable, suppColCount) {
       subtotals.approved += (l.approved_amount || 0);
 
       const field = (key, val) => editable
-        ? `<input type="number" step="0.01" data-account="${l.account_id}" data-field="${key}" class="edit-input" value="${val ?? 0}">`
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="${key}" class="edit-input" value="${money(val ?? 0)}">`
         : money(val);
 
       const remarksCell = editable
@@ -116,7 +116,7 @@ function buildRows(lines, editable, suppColCount) {
       for (let i = 1; i <= suppColCount; i++) {
         const val = suppByNum[i] ?? 0;
         suppCells += `<td class="num">${editable
-          ? `<input type="number" step="0.01" data-account="${l.account_id}" data-field="supp" data-supp-num="${i}" class="edit-input" value="${val}">`
+          ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="supp" data-supp-num="${i}" class="edit-input" value="${money(val)}">`
           : money(val)}</td>`;
       }
 
@@ -161,6 +161,10 @@ function renderProposal(data, fromCache) {
   document.getElementById("c_result").style.display = "block";
   const typeLabel = data.budget_type === "supplemental" ? `supplemental No. ${data.supplemental_number}` : "annual";
   document.getElementById("c_title").textContent = `${typeLabel} proposal — ${document.getElementById("c_year").value}`;
+  const officeLogo = document.getElementById("c_officeLogo");
+  officeLogo.onload = () => { officeLogo.style.display = "block"; };
+  officeLogo.onerror = () => { officeLogo.style.display = "none"; };
+  officeLogo.src = `/api/offices/${getOfficeId()}/logo?t=${Date.now()}`;
   const badge = document.getElementById("c_statusBadge");
   badge.textContent = data.status;
   badge.className = "badge " + data.status;
@@ -211,9 +215,9 @@ function collectEditedLines() {
       byAccount[id].remarks = inp.value;
     } else if (inp.dataset.field === "supp") {
       byAccount[id].current_supplementals ||= {};
-      byAccount[id].current_supplementals[inp.dataset.suppNum] = Number(inp.value || 0);
+      byAccount[id].current_supplementals[inp.dataset.suppNum] = parseMoney(inp.value);
     } else {
-      byAccount[id][inp.dataset.field] = Number(inp.value || 0);
+      byAccount[id][inp.dataset.field] = parseMoney(inp.value);
     }
   });
   return Object.values(byAccount);

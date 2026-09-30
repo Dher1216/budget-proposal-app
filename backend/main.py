@@ -183,6 +183,129 @@ def create_office(payload: schemas.OfficeCreate, db: Session = Depends(get_db),
     return office
 
 
+# ---------------------------------------------------------------- branding --
+# Logos are visual-only, not sensitive, so the GET (serving) endpoints are
+# deliberately public/unauthenticated -- this lets a plain <img src="..."> tag
+# display them directly (including on the login screen, before anyone is
+# signed in), without needing to fetch+blob just to attach an auth header.
+# Uploading/removing a logo remains admin-only.
+
+MAX_LOGO_BYTES = 3 * 1024 * 1024  # 3 MB -- logos should always be small
+ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"}
+
+
+async def _read_and_validate_logo(file: UploadFile) -> tuple:
+    if file.content_type not in ALLOWED_LOGO_TYPES:
+        raise HTTPException(status_code=400, detail="Logo must be a PNG, JPG, WEBP, or SVG image.")
+    contents = await file.read()
+    if len(contents) > MAX_LOGO_BYTES:
+        raise HTTPException(status_code=400, detail=f"Logo must be smaller than {MAX_LOGO_BYTES // (1024*1024)} MB.")
+    return contents, file.content_type
+
+
+def _get_or_create_setting(db: Session, key: str) -> models.AppSetting:
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+    if not setting:
+        setting = models.AppSetting(key=key)
+        db.add(setting)
+        db.flush()
+    return setting
+
+
+def _serve_image_or_404(data: Optional[bytes], content_type: Optional[str]):
+    if not data:
+        raise HTTPException(status_code=404, detail="No logo set.")
+    return Response(content=data, media_type=content_type or "image/png")
+
+
+@app.get("/api/branding/login-logo")
+def get_login_logo(db: Session = Depends(get_db)):
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == "login_logo").first()
+    return _serve_image_or_404(setting.value_data if setting else None, setting.value_content_type if setting else None)
+
+
+@app.get("/api/branding/default-logo")
+def get_default_logo(db: Session = Depends(get_db)):
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == "default_logo").first()
+    return _serve_image_or_404(setting.value_data if setting else None, setting.value_content_type if setting else None)
+
+
+@app.post("/api/admin/branding/login-logo")
+async def upload_login_logo(file: UploadFile = File(...), db: Session = Depends(get_db),
+                             admin: models.User = Depends(require_admin)):
+    contents, content_type = await _read_and_validate_logo(file)
+    setting = _get_or_create_setting(db, "login_logo")
+    setting.value_data = contents
+    setting.value_content_type = content_type
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/admin/branding/login-logo")
+def delete_login_logo(db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == "login_logo").first()
+    if setting:
+        db.delete(setting)
+        db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/admin/branding/default-logo")
+async def upload_default_logo(file: UploadFile = File(...), db: Session = Depends(get_db),
+                               admin: models.User = Depends(require_admin)):
+    contents, content_type = await _read_and_validate_logo(file)
+    setting = _get_or_create_setting(db, "default_logo")
+    setting.value_data = contents
+    setting.value_content_type = content_type
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/admin/branding/default-logo")
+def delete_default_logo(db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == "default_logo").first()
+    if setting:
+        db.delete(setting)
+        db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/offices/{office_id}/logo")
+def get_office_logo(office_id: int, db: Session = Depends(get_db)):
+    office = db.query(models.Office).get(office_id)
+    if office and office.logo_data:
+        return Response(content=office.logo_data, media_type=office.logo_content_type or "image/png")
+    # Fall back to the default/province logo when this office has none of its own.
+    default = db.query(models.AppSetting).filter(models.AppSetting.key == "default_logo").first()
+    return _serve_image_or_404(default.value_data if default else None, default.value_content_type if default else None)
+
+
+@app.post("/api/offices/{office_id}/logo", response_model=schemas.OfficeOut)
+async def upload_office_logo(office_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                              admin: models.User = Depends(require_admin)):
+    office = db.query(models.Office).get(office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+    contents, content_type = await _read_and_validate_logo(file)
+    office.logo_data = contents
+    office.logo_content_type = content_type
+    db.commit()
+    db.refresh(office)
+    return office
+
+
+@app.delete("/api/offices/{office_id}/logo", response_model=schemas.OfficeOut)
+def delete_office_logo(office_id: int, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    office = db.query(models.Office).get(office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+    office.logo_data = None
+    office.logo_content_type = None
+    db.commit()
+    db.refresh(office)
+    return office
+
+
 # ------------------------------------------------------------------- users --
 
 @app.get("/api/users", response_model=List[schemas.UserOut])
@@ -752,6 +875,7 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
 
     total_proposed = 0.0
     total_adjusted = 0.0
+    total_approved = 0.0
     for p in prop_q.all():
         for l in p.lines:
             proposed = l.proposed_amount or 0
@@ -760,6 +884,10 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
             # adjustment has been made yet, so this reflects "what the
             # balance would look like using admin's adjustments so far."
             total_adjusted += l.adjusted_proposal if l.adjusted_proposal is not None else proposed
+            # Approved only counts once an admin has actually approved that
+            # line -- this reflects the real, locked-in commitment, which
+            # matters once a prorated/adjusted amount has been approved.
+            total_approved += l.approved_amount or 0
 
     return schemas.BudgetSummaryOut(
         year=year, budget_type=budget_type,
@@ -767,8 +895,10 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
         available_budget=available_budget,
         total_proposed=total_proposed,
         total_adjusted=total_adjusted,
+        total_approved=total_approved,
         balance_vs_proposed=available_budget - total_proposed,
         balance_vs_adjusted=available_budget - total_adjusted,
+        balance_vs_approved=available_budget - total_approved,
     )
 
 
@@ -954,7 +1084,12 @@ def download_excel(proposal_id: int, db: Session = Depends(get_db),
 # ephemeral filesystem (e.g. Render's free tier) -- as long as the database
 # itself is persistent (e.g. an external free Postgres like Neon/Supabase),
 # attachments survive restarts and redeploys without needing a paid disk.
-MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024  # 15 MB per file
+# PDF-only, capped at 8 MB per file. Reasoning: a typical scanned multi-page
+# supporting document (quotation, canvass, PR) at a normal scan quality runs
+# well under this, but 15 MB (the old limit) let a single file eat 3% of
+# Neon's free 0.5 GB tier -- 8 MB keeps individual files reasonable while
+# still comfortably fitting a 10-20 page scanned PDF.
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024  # 8 MB per file
 
 
 def get_line_or_404(db: Session, line_id: int) -> models.ProposalLine:
@@ -976,13 +1111,21 @@ async def upload_attachment(line_id: int, file: UploadFile = File(...),
             detail="This proposal has already been submitted. Reopen it before adding attachments."
         )
 
+    filename = file.filename or "attachment"
+    is_pdf = (file.content_type == "application/pdf") or filename.lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted for supporting documents.")
+
     contents = await file.read()
     if len(contents) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(status_code=400, detail="File is larger than the 15 MB limit.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File is larger than the {MAX_ATTACHMENT_BYTES // (1024*1024)} MB limit for supporting documents."
+        )
 
     attachment = models.ProposalLineAttachment(
         proposal_line_id=line_id,
-        filename=file.filename or "attachment",
+        filename=filename,
         content_type=file.content_type,
         file_data=contents,
         file_size=len(contents),

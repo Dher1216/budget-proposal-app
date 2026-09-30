@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Budget Proposal — Office Portal</title>
-<link rel="stylesheet" href="css/app.css?v=20260922">
+<link rel="stylesheet" href="css/app.css?v=20260930">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. You'll need a connection to save or submit.</div>
@@ -42,9 +42,12 @@
 
     <div class="panel" id="c_result" style="display:none;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <div>
-          <strong id="c_title"></strong>
-          <span class="badge" id="c_statusBadge"></span>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img id="c_officeLogo" class="header-logo" alt="" style="display:none;">
+          <div>
+            <strong id="c_title"></strong>
+            <span class="badge" id="c_statusBadge"></span>
+          </div>
         </div>
         <div>
           <button class="btn secondary" id="c_saveBtn">Save draft</button>
@@ -63,7 +66,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20260922"></script>
-<script src="js/client.js?v=20260922"></script>
+<script src="js/api.js?v=20260930"></script>
+<script src="js/client.js?v=20260930"></script>
 </body>
 </html>

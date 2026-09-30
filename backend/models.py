@@ -40,9 +40,26 @@ class Office(Base):
     name = Column(String, nullable=False)
     code = Column(String, nullable=True)          # e.g. "1000 1 01 001"
     sector = Column(String, nullable=True)         # e.g. "GENERAL PUBLIC SERVICES"
+    logo_data = Column(LargeBinary, nullable=True)       # falls back to the default/province logo if not set
+    logo_content_type = Column(String, nullable=True)
+
+    @property
+    def has_logo(self) -> bool:
+        return self.logo_data is not None
 
     users = relationship("User", back_populates="office")
     proposals = relationship("Proposal", back_populates="office")
+
+
+class AppSetting(Base):
+    """Small key/value store for branding assets that apply app-wide rather
+    than to one office -- the login screen logo and the default/province
+    logo (used as the fallback wherever an office has no logo of its own)."""
+    __tablename__ = "app_settings"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    value_data = Column(LargeBinary, nullable=True)
+    value_content_type = Column(String, nullable=True)
 
 
 class User(Base):
