@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261002">
+<link rel="stylesheet" href="css/app.css?v=20261003">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -184,8 +184,13 @@
       </div>
 
       <h3 style="margin-bottom:6px;">Expenditures (by Account)</h3>
-      <div class="table-wrap">
+      <div class="table-wrap" style="margin-bottom:20px;">
         <table class="data-table" id="s_table"></table>
+      </div>
+
+      <h3 style="margin-bottom:6px;">Special Purpose Appropriations</h3>
+      <div class="table-wrap">
+        <table class="data-table" id="s_spaTable"></table>
       </div>
     </div>
   </div>
@@ -516,7 +521,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261002"></script>
-<script src="js/admin.js?v=20261002"></script>
+<script src="js/api.js?v=20261003"></script>
+<script src="js/admin.js?v=20261003"></script>
 </body>
 </html>

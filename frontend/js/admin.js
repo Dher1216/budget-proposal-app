@@ -899,12 +899,15 @@ function recomputeLiveSpaPreview() {
   const nta = byCategory["External Sources - IRA / National Tax Allocation"] || 0;
   const devFund = Math.round(nta * 0.20 * 100) / 100;
 
-  const ldrrmfBase =
-    (byCategory["Local Sources - Tax Revenue"] || 0) +
-    (byCategory["Local Sources - Non-Tax Revenue"] || 0) +
-    (byCategory["External Sources - IRA / National Tax Allocation"] || 0) +
-    (byCategory["External Sources - Other Shares"] || 0) +
-    (byCategory["Non-Income Receipts"] || 0);
+  // 5% of total receipts, excluding only the "Beginning Cash Balance"
+  // category -- this correctly INCLUDES "External Sources - Share from
+  // National Wealth" (a normal receipt), which is a different amount from
+  // the similarly-named beginning-balance line that's excluded here by
+  // category, not by name.
+  let ldrrmfBase = 0;
+  Object.keys(byCategory).forEach(cat => {
+    if (cat !== "Beginning Cash Balance") ldrrmfBase += byCategory[cat];
+  });
   const ldrrmf = Math.round(ldrrmfBase * 0.05 * 100) / 100;
 
   const rows = spaTable.querySelectorAll("tbody tr");
@@ -1194,6 +1197,11 @@ document.getElementById("s_load").addEventListener("click", async () => {
     if (budget_type === "supplemental") fsPath += `&supplemental_number=${supp}`;
     const { data: fundSources } = await apiGet(fsPath, { cacheable: true });
     renderSummaryFundTable(fundSources);
+
+    let spaPath = `/api/spa?year=${year}&budget_type=${budget_type}`;
+    if (budget_type === "supplemental") spaPath += `&supplemental_number=${supp}`;
+    const { data: spaRows } = await apiGet(spaPath, { cacheable: true });
+    renderSummarySpaTable(spaRows);
   } catch (err) {
     alert(err.message);
   }
@@ -1218,6 +1226,21 @@ function renderSummaryFundTable(sources) {
   });
   rows += `<tr class="subtotal-row"><td colspan="2">Total Available Budget</td><td class="num">${money(total)}</td></tr>`;
   table.innerHTML = "<thead><tr><th>Category</th><th>Particulars</th><th class='num'>Amount</th></tr></thead><tbody>" + rows + "</tbody>";
+}
+
+function renderSummarySpaTable(rows) {
+  const table = document.getElementById("s_spaTable");
+  if (!rows.length) {
+    table.innerHTML = "<thead><tr><th>Deduction</th><th class='num'>Amount</th></tr></thead><tbody><tr><td colspan='2'>No Special Purpose Appropriations recorded for this budget cycle.</td></tr></tbody>";
+    return;
+  }
+  let total = 0;
+  const trs = rows.map(r => {
+    total += r.amount;
+    return `<tr><td>${r.name}${r.auto_computed ? ' <span class="hint" style="margin:0;">(auto-computed)</span>' : ""}</td><td class="num">${money(r.amount)}</td></tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr><th>Deduction</th><th class="num">Amount</th></tr></thead>
+    <tbody>${trs}<tr class="subtotal-row"><td>Total Special Purpose Appropriations</td><td class="num">${money(total)}</td></tr></tbody>`;
 }
 
 document.getElementById("s_download").addEventListener("click", async () => {

@@ -910,6 +910,9 @@ def delete_fund_source(source_id: int, db: Session = Depends(get_db), admin: mod
 # (20% Development Fund, 5% LDRRMF); others (Aid to Barangays, and any
 # custom ones admin adds) are plain editable amounts.
 
+BEGINNING_CASH_CAT = "Beginning Cash Balance"
+
+
 def _fund_source_totals_by_category(db: Session, year: int, budget_type: str, supplemental_number: Optional[int]):
     q = db.query(models.FundSource).filter(
         models.FundSource.year == year, models.FundSource.budget_type == budget_type,
@@ -930,13 +933,14 @@ def _compute_dev_fund_20pct(by_category: dict) -> float:
 
 
 def _compute_ldrrmf_5pct(by_category: dict) -> float:
-    base = (
-        by_category.get("Local Sources - Tax Revenue", 0.0)
-        + by_category.get("Local Sources - Non-Tax Revenue", 0.0)
-        + by_category.get("External Sources - IRA / National Tax Allocation", 0.0)
-        + by_category.get("External Sources - Other Shares", 0.0)
-        + by_category.get("Non-Income Receipts", 0.0)
-    )
+    # 5% of TOTAL RECEIPTS excluding only the Beginning Cash Balance
+    # category. This deliberately includes "External Sources - Share from
+    # National Wealth" (a normal receipt) -- it's a different amount from
+    # the similarly-named "Share from the Utilization of National Wealth
+    # (80%)" line that lives under Beginning Cash Balance, which is a
+    # restricted account used only for electricity and is excluded here
+    # because it's a beginning-balance item, not because of its name.
+    base = sum(amount for category, amount in by_category.items() if category != BEGINNING_CASH_CAT)
     return round(base * 0.05, 2)
 
 
