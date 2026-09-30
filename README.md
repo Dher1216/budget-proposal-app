@@ -74,6 +74,17 @@ proposals across offices, then exporting the final report to Excel.
   commas as you type (e.g. 1,234,567.89) to make large numbers easier to
   enter correctly; values are still stored as plain numbers.
 - **Supporting documents** — PDF only, capped at 8 MB per file.
+- **Special Purpose Appropriations** (Funding tab) — the 20% Development
+  Fund and 5% LDRRMF compute automatically from your fund sources; Aid to
+  Barangays defaults to ₱590,000 and is editable; add other one-off
+  deductions as needed. These are deducted from Available Budget before
+  offices are allocated anything, same as in the real budget process.
+- **LBP Form 1 export** (Summary Report tab) — the full "Budget of
+  Expenditures and Sources of Financing" report: fund sources by category,
+  office expenditures by classification, SPA deductions, and the resulting
+  ending balance, all in one document. Note: unlike the original government
+  template, this doesn't split the current year into semesters (Actual/
+  Estimate) — the app only tracks a single current-year total.
 
 ## Running it locally (to try it out)
 

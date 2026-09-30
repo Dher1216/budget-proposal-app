@@ -126,6 +126,26 @@ function loadBrandingPreviews() {
   defaultImg.src = `/api/branding/default-logo?t=${bust}`;
 }
 
+async function loadProvinceName() {
+  try {
+    const { data } = await apiGet("/api/branding/province-name");
+    document.getElementById("brand_provinceName").value = data.name || "";
+  } catch (err) { console.error(err); }
+}
+
+document.getElementById("brand_saveProvince").addEventListener("click", async () => {
+  const statusEl = document.getElementById("brand_provinceStatus");
+  const name = document.getElementById("brand_provinceName").value.trim();
+  try {
+    await apiPost("/api/admin/branding/province-name", { name });
+    statusEl.textContent = "Province name saved.";
+    statusEl.className = "status-msg ok";
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
 document.getElementById("brand_loginFile").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -699,6 +719,10 @@ function renderBalancePanel(containerId, summary) {
       <div class="value">₱${money(summary.available_budget)}</div>
     </div>
     <div class="balance-item">
+      <div class="label">Special Purpose Appropriations</div>
+      <div class="value">₱${money(summary.total_spa)}</div>
+    </div>
+    <div class="balance-item">
       <div class="label">Total Proposed (All Offices)</div>
       <div class="value">₱${money(summary.total_proposed)}</div>
     </div>
@@ -801,6 +825,7 @@ document.getElementById("f_load").addEventListener("click", async () => {
     document.getElementById("f_result").style.display = "block";
     renderFundTable(data);
     loadBalance(year, budget_type, supp, "f_balancePanel");
+    loadSpa(year, budget_type, supp);
   } catch (err) {
     alert(err.message);
   }
@@ -864,9 +889,121 @@ async function deleteFundSource(id) {
   }
 }
 
+// ------------------------------------------------ special purpose appropriations --
+
+let currentSpaContext = null;
+
+function renderSpaTable(rows) {
+  const table = document.getElementById("spa_table");
+  let total = 0;
+  const trs = rows.map(r => {
+    total += r.amount;
+    const isAuto = !!r.auto_computed;
+    const amountCell = isAuto
+      ? `${money(r.amount)} <span class="hint" style="margin:0;">(auto-computed)</span>`
+      : `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" class="spa-amount-input" data-id="${r.id}" value="${money(r.amount)}">
+         <button class="btn secondary" style="padding:4px 10px;" onclick="saveSpaAmount(${r.id})">Save</button>`;
+    const deleteBtn = isAuto ? "" : `<button class="btn danger" style="padding:4px 10px;" onclick="deleteSpa(${r.id})">Delete</button>`;
+    return `<tr>
+      <td>${r.name}</td>
+      <td class="num">${amountCell}</td>
+      <td>${deleteBtn}</td>
+    </tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr><th>Deduction</th><th class="num">Amount</th><th>Actions</th></tr></thead>
+    <tbody>${trs}
+    <tr class="subtotal-row"><td>Total Special Purpose Appropriations</td><td class="num">${money(total)}</td><td></td></tr>
+    </tbody>`;
+}
+
+async function loadSpa(year, budget_type, supp) {
+  currentSpaContext = { year, budget_type, supp };
+  let path = `/api/spa?year=${year}&budget_type=${budget_type}`;
+  if (budget_type === "supplemental") path += `&supplemental_number=${supp}`;
+  try {
+    const { data } = await apiGet(path, { cacheable: true });
+    document.getElementById("spa_result").style.display = "block";
+    renderSpaTable(data);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function saveSpaAmount(id) {
+  const input = document.querySelector(`.spa-amount-input[data-id="${id}"]`);
+  const statusEl = document.getElementById("spa_status");
+  try {
+    await apiPut(`/api/spa/${id}`, { amount: parseMoney(input.value) });
+    statusEl.textContent = "Amount saved.";
+    statusEl.className = "status-msg ok";
+    document.getElementById("f_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+}
+
+async function deleteSpa(id) {
+  if (!confirm("Remove this deduction?")) return;
+  const statusEl = document.getElementById("spa_status");
+  try {
+    await apiDelete(`/api/spa/${id}`);
+    statusEl.textContent = "Deduction removed.";
+    statusEl.className = "status-msg ok";
+    document.getElementById("f_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+}
+
+document.getElementById("spa_addBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("spa_status");
+  if (!currentSpaContext) { statusEl.textContent = "Load a budget cycle first."; statusEl.className = "status-msg error"; return; }
+  const name = document.getElementById("spa_newName").value.trim();
+  const amount = parseMoney(document.getElementById("spa_newAmount").value);
+  if (!name) { statusEl.textContent = "Enter a name for this deduction."; statusEl.className = "status-msg error"; return; }
+  try {
+    await apiPost("/api/spa", {
+      year: Number(currentSpaContext.year),
+      budget_type: currentSpaContext.budget_type,
+      supplemental_number: currentSpaContext.budget_type === "supplemental" ? Number(currentSpaContext.supp) : null,
+      name, amount,
+    });
+    statusEl.textContent = "Deduction added.";
+    statusEl.className = "status-msg ok";
+    document.getElementById("spa_newName").value = "";
+    document.getElementById("spa_newAmount").value = "";
+    document.getElementById("f_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("s_downloadLbp").addEventListener("click", async () => {
+  const year = document.getElementById("s_year").value;
+  const budget_type = document.getElementById("s_type").value;
+  const supp = document.getElementById("s_supplementalNumber").value;
+  let path = `/api/admin/lbp-form1-excel?year=${year}&budget_type=${budget_type}`;
+  if (budget_type === "supplemental") path += `&supplemental_number=${supp}`;
+  try {
+    const res = await fetch(path, { headers: { Authorization: "Bearer " + getToken() } });
+    if (!res.ok) throw new Error("Could not download — check your connection.");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `LBP_Form1_${budget_type}_${year}.xlsx`;
+    a.click();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 // ------------------------------------------------------------------ init --
 loadOfficesIntoSelects();
 loadBrandingPreviews();
+loadProvinceName();
 loadAccounts();
 loadUsers();
 loadFundCategories();

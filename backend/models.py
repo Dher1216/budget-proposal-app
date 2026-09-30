@@ -51,6 +51,22 @@ class Office(Base):
     proposals = relationship("Proposal", back_populates="office")
 
 
+class SpecialPurposeAppropriation(Base):
+    """Mandatory deductions from available funds before offices can be
+    allocated anything -- e.g. the 20% Development Fund and 5% LDRRMF,
+    which are computed automatically from fund sources, plus fixed/editable
+    ones like Aid to Barangays, plus any other custom ones admin adds."""
+    __tablename__ = "special_purpose_appropriations"
+    id = Column(Integer, primary_key=True)
+    year = Column(Integer, nullable=False)
+    budget_type = Column(Enum(BudgetType), nullable=False)
+    supplemental_number = Column(Integer, nullable=True)
+    name = Column(String, nullable=False)
+    amount = Column(Float, nullable=False, default=0)      # stored value; ignored/recomputed for auto_computed rows
+    auto_computed = Column(String, nullable=True)  # None | "dev_fund_20pct" | "ldrrmf_5pct"
+    sort_order = Column(Integer, nullable=False, default=0)
+
+
 class AppSetting(Base):
     """Small key/value store for branding assets that apply app-wide rather
     than to one office -- the login screen logo and the default/province

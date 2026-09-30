@@ -194,12 +194,38 @@ class BudgetSummaryOut(BaseModel):
     budget_type: str
     supplemental_number: Optional[int] = None
     available_budget: float
+    total_spa: float
     total_proposed: float
     total_adjusted: float
     total_approved: float
     balance_vs_proposed: float
     balance_vs_adjusted: float
     balance_vs_approved: float
+
+
+class SpaCreate(BaseModel):
+    year: int
+    budget_type: str
+    supplemental_number: Optional[int] = None
+    name: str
+    amount: float = 0
+
+
+class SpaUpdate(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[float] = None
+
+
+class SpaOut(BaseModel):
+    id: int
+    year: int
+    budget_type: str
+    supplemental_number: Optional[int] = None
+    name: str
+    amount: float
+    auto_computed: Optional[str] = None
+    class Config:
+        from_attributes = True
 
 
 class CleanupAttachmentsRequest(BaseModel):

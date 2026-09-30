@@ -356,3 +356,184 @@ def build_summary_workbook(report: dict) -> io.BytesIO:
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+# ----------------------------------------------------------- LBP Form No. 1 --
+
+LOCAL_TAX_CAT = "Local Sources - Tax Revenue"
+LOCAL_NONTAX_CAT = "Local Sources - Non-Tax Revenue"
+BEGINNING_CASH_CAT = "Beginning Cash Balance"
+NON_INCOME_CAT = "Non-Income Receipts"
+
+
+def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
+    """
+    Builds a consolidated 'Budget of Expenditures and Sources of Financing'
+    report (LBP Form No. 1 layout), combining:
+      - fund_sources: list of {category, particulars, amount}
+      - summary_rows: per-account totals across all offices (same shape as
+        schemas.SummaryAccountRow), used for the Expenditures section
+      - spa_rows: list of {name, amount, auto_computed}
+      - year, budget_type, supplemental_number, province_name
+
+    Note: unlike the original government template, this doesn't split the
+    current year into semesters (Actual/Estimate) -- this system doesn't
+    collect budget data at that granularity, so the current-year column
+    here is a single total.
+    """
+    year = data["year"]
+    prev_year = year - 2
+    current_year = year - 1
+    province_name = data.get("province_name") or "___________________"
+
+    fund_sources = data.get("fund_sources", [])
+    summary_rows = data.get("summary_rows", [])
+    spa_rows = data.get("spa_rows", [])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "LBP Form 1"
+    ncols = 5  # Particulars | Account Code | Prev Year Actual | Current Year Total | Budget Year Proposed
+
+    def title_row(row, text, bold=True, size=11, center=True):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        c = ws.cell(row=row, column=1, value=text)
+        c.font = Font(name="Arial", bold=bold, size=size)
+        if center:
+            c.alignment = Alignment(horizontal="center")
+        return row + 1
+
+    r = 1
+    r = title_row(r, "LBP Form No. 1", size=10)
+    r += 1
+    r = title_row(r, "BUDGET OF EXPENDITURES AND SOURCES OF FINANCING", size=13)
+    r = title_row(r, f"Province of {province_name}" if province_name else "PROVINCE", size=11)
+    type_label = "ANNUAL" if data["budget_type"] == "annual" else f"SUPPLEMENTAL NO. {data.get('supplemental_number') or 1}"
+    r = title_row(r, f"{type_label} BUDGET - CY {year}", size=10, bold=False)
+    r += 1
+
+    header_row = r
+    headers = ["PARTICULARS", "Account Code", f"PAST YEAR {prev_year}\n(Actual)",
+               f"CURRENT YEAR {current_year}\n(Total)", f"BUDGET YEAR {year}\n(PROPOSED)"]
+    for col, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col, value=h)
+        cell.font = Font(name="Arial", bold=True, size=9)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.fill = HEADER_FILL
+        cell.border = BORDER
+    ws.row_dimensions[header_row].height = 32
+    r = header_row + 1
+
+    def section_row(row, text):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        c = ws.cell(row=row, column=1, value=text)
+        c.font = Font(name="Arial", bold=True, size=10)
+        c.fill = SECTION_FILL
+        c.border = BORDER
+        return row + 1
+
+    def data_row(row, name, code, prev, curr, proposed, bold=False, fill=None):
+        vals = [name, code, prev, curr, proposed]
+        for col, v in enumerate(vals, start=1):
+            cell = ws.cell(row=row, column=col, value=v)
+            cell.font = Font(name="Arial", bold=bold, size=9)
+            cell.border = BORDER
+            if col >= 3:
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            if fill:
+                cell.fill = fill
+        return row + 1
+
+    # ---- I. Beginning Cash Balance ----
+    r = section_row(r, "I. BEGINNING CASH BALANCE")
+    beginning_total = 0.0
+    for fs in fund_sources:
+        if fs["category"] == BEGINNING_CASH_CAT:
+            r = data_row(r, fs["particulars"], "", "", "", fs["amount"])
+            beginning_total += fs["amount"]
+
+    # ---- II. Receipts ----
+    r = section_row(r, "II. RECEIPTS")
+    r = section_row(r, "A. LOCAL SOURCES")
+    local_total = 0.0
+    for label, cat in [("1. Tax Revenue", LOCAL_TAX_CAT), ("2. Non-Tax Revenue", LOCAL_NONTAX_CAT)]:
+        r = data_row(r, label, "", "", "", "", bold=True)
+        sub = 0.0
+        for fs in fund_sources:
+            if fs["category"] == cat:
+                r = data_row(r, "    " + fs["particulars"], "", "", "", fs["amount"])
+                sub += fs["amount"]
+        r = data_row(r, f"Total {label.split('. ')[1]}", "", "", "", sub, bold=True, fill=SECTION_FILL)
+        local_total += sub
+    r = data_row(r, "TOTAL LOCAL SOURCES", "", "", "", local_total, bold=True, fill=HEADER_FILL)
+
+    r = section_row(r, "B. EXTERNAL SOURCES")
+    external_total = 0.0
+    for fs in fund_sources:
+        if fs["category"].startswith("External Sources"):
+            r = data_row(r, fs["particulars"], "", "", "", fs["amount"])
+            external_total += fs["amount"]
+    r = data_row(r, "TOTAL EXTERNAL SOURCES", "", "", "", external_total, bold=True, fill=HEADER_FILL)
+
+    r = section_row(r, "C. NON-INCOME RECEIPTS")
+    non_income_total = 0.0
+    for fs in fund_sources:
+        if fs["category"] == NON_INCOME_CAT:
+            r = data_row(r, fs["particulars"], "", "", "", fs["amount"])
+            non_income_total += fs["amount"]
+    r = data_row(r, "TOTAL NON-INCOME RECEIPTS", "", "", "", non_income_total, bold=True, fill=HEADER_FILL)
+
+    total_receipts = beginning_total + local_total + external_total + non_income_total
+    r = data_row(r, "TOTAL RECEIPTS", "", "", "", total_receipts, bold=True, fill=HEADER_FILL)
+    r += 1
+
+    # ---- III. Expenditures (from office proposals, by classification) ----
+    r = section_row(r, "III. EXPENDITURES")
+    rows_by_class = {k: [] for k in CLASSIFICATION_ORDER}
+    for row_data in summary_rows:
+        rows_by_class.setdefault(row_data["classification"], []).append(row_data)
+
+    expenditure_class_totals = {}
+    for classification in CLASSIFICATION_ORDER:
+        rows = rows_by_class.get(classification, [])
+        if not rows:
+            expenditure_class_totals[classification] = 0.0
+            continue
+        rows = sorted(rows, key=lambda x: (x["account_code"], x["account_name"]))
+        r = section_row(r, CLASSIFICATION_LABELS[classification])
+        class_total = 0.0
+        for row_data in rows:
+            r = data_row(r, row_data["account_name"], row_data["account_code"],
+                         row_data["total_prev_year_actual"], row_data["total_current_total"],
+                         row_data["total_proposed"])
+            class_total += row_data["total_proposed"]
+        r = data_row(r, f"Total {CLASSIFICATION_LABELS[classification]}", "", "", "", class_total,
+                     bold=True, fill=SECTION_FILL)
+        expenditure_class_totals[classification] = class_total
+
+    # ---- D. Special Purpose Appropriations ----
+    r = section_row(r, "D. SPECIAL PURPOSE APPROPRIATIONS (SPA's)")
+    spa_total = 0.0
+    for spa in spa_rows:
+        r = data_row(r, spa["name"], "", "", "", spa["amount"])
+        spa_total += spa["amount"]
+    r = data_row(r, "Total Special Purpose Appropriations", "", "", "", spa_total, bold=True, fill=SECTION_FILL)
+
+    total_expenditures = sum(expenditure_class_totals.values()) + spa_total
+    r = data_row(r, "TOTAL EXPENDITURES", "", "", "", total_expenditures, bold=True, fill=HEADER_FILL)
+    r += 1
+
+    # ---- IV. Ending Balance ----
+    ending_balance = total_receipts - total_expenditures
+    r = data_row(r, "IV. ENDING BALANCE", "", "", "", ending_balance, bold=True, fill=HEADER_FILL)
+
+    widths = [46, 14, 16, 16, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf

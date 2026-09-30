@@ -19,7 +19,7 @@ from auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin,
 )
-from excel_export import build_report_workbook, build_summary_workbook
+from excel_export import build_report_workbook, build_summary_workbook, build_lbp_form1_workbook
 
 Base.metadata.create_all(bind=engine)
 
@@ -268,6 +268,23 @@ def delete_default_logo(db: Session = Depends(get_db), admin: models.User = Depe
         db.delete(setting)
         db.commit()
     return {"ok": True}
+
+
+@app.get("/api/branding/province-name")
+def get_province_name(db: Session = Depends(get_db)):
+    setting = db.query(models.AppSetting).filter(models.AppSetting.key == "province_name").first()
+    name = setting.value_data.decode("utf-8") if setting and setting.value_data else ""
+    return {"name": name}
+
+
+@app.post("/api/admin/branding/province-name")
+def set_province_name(payload: dict, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    name = (payload.get("name") or "").strip()
+    setting = _get_or_create_setting(db, "province_name")
+    setting.value_data = name.encode("utf-8")
+    setting.value_content_type = "text/plain"
+    db.commit()
+    return {"name": name}
 
 
 @app.get("/api/offices/{office_id}/logo")
@@ -850,6 +867,162 @@ def delete_fund_source(source_id: int, db: Session = Depends(get_db), admin: mod
     return {"ok": True}
 
 
+# --------------------------------------------------- special purpose appropriations --
+# Mandatory deductions taken from available funds BEFORE offices can be
+# allocated anything. Two are computed automatically from fund sources
+# (20% Development Fund, 5% LDRRMF); others (Aid to Barangays, and any
+# custom ones admin adds) are plain editable amounts.
+
+def _fund_source_totals_by_category(db: Session, year: int, budget_type: str, supplemental_number: Optional[int]):
+    q = db.query(models.FundSource).filter(
+        models.FundSource.year == year, models.FundSource.budget_type == budget_type,
+    )
+    if budget_type == "supplemental":
+        q = q.filter(models.FundSource.supplemental_number == (supplemental_number or 1))
+    else:
+        q = q.filter(models.FundSource.supplemental_number.is_(None))
+    totals = {}
+    for fs in q.all():
+        totals[fs.category] = totals.get(fs.category, 0.0) + fs.amount
+    return totals
+
+
+def _compute_dev_fund_20pct(by_category: dict) -> float:
+    nta = by_category.get("External Sources - IRA / National Tax Allocation", 0.0)
+    return round(nta * 0.20, 2)
+
+
+def _compute_ldrrmf_5pct(by_category: dict) -> float:
+    base = (
+        by_category.get("Local Sources - Tax Revenue", 0.0)
+        + by_category.get("Local Sources - Non-Tax Revenue", 0.0)
+        + by_category.get("External Sources - IRA / National Tax Allocation", 0.0)
+        + by_category.get("External Sources - Other Shares", 0.0)
+        + by_category.get("Non-Income Receipts", 0.0)
+    )
+    return round(base * 0.05, 2)
+
+
+def _ensure_default_spa_rows(db: Session, year: int, budget_type: str, supplemental_number: Optional[int]):
+    supp = (supplemental_number or 1) if budget_type == "supplemental" else None
+    existing = db.query(models.SpecialPurposeAppropriation).filter(
+        models.SpecialPurposeAppropriation.year == year,
+        models.SpecialPurposeAppropriation.budget_type == budget_type,
+        models.SpecialPurposeAppropriation.supplemental_number == supp,
+    ).all()
+    if existing:
+        return existing
+
+    defaults = [
+        ("Appropriation for Development Programs/Projects (20% Development Fund)", "dev_fund_20pct", 0),
+        ("Appropriation for Local Disaster Risk Reduction and Management Programs/Projects (5% LDRRMF)", "ldrrmf_5pct", 1),
+        ("Aid to Barangays", None, 2),
+    ]
+    rows = []
+    for name, computed_key, order in defaults:
+        row = models.SpecialPurposeAppropriation(
+            year=year, budget_type=budget_type, supplemental_number=supp,
+            name=name, amount=590000 if name == "Aid to Barangays" else 0,
+            auto_computed=computed_key, sort_order=order,
+        )
+        db.add(row)
+        rows.append(row)
+    db.commit()
+    for r in rows:
+        db.refresh(r)
+    return rows
+
+
+def _spa_rows_with_live_amounts(db: Session, year: int, budget_type: str, supplemental_number: Optional[int]):
+    rows = _ensure_default_spa_rows(db, year, budget_type, supplemental_number)
+    by_category = _fund_source_totals_by_category(db, year, budget_type, supplemental_number)
+    out = []
+    for r in sorted(rows, key=lambda r: r.sort_order):
+        amount = r.amount
+        if r.auto_computed == "dev_fund_20pct":
+            amount = _compute_dev_fund_20pct(by_category)
+        elif r.auto_computed == "ldrrmf_5pct":
+            amount = _compute_ldrrmf_5pct(by_category)
+        out.append(schemas.SpaOut(
+            id=r.id, year=r.year, budget_type=r.budget_type, supplemental_number=r.supplemental_number,
+            name=r.name, amount=amount, auto_computed=r.auto_computed,
+        ))
+    return out
+
+
+def _total_spa(db: Session, year: int, budget_type: str, supplemental_number: Optional[int]) -> float:
+    return sum(r.amount for r in _spa_rows_with_live_amounts(db, year, budget_type, supplemental_number))
+
+
+@app.get("/api/spa", response_model=List[schemas.SpaOut])
+def list_spa(year: int, budget_type: str, supplemental_number: Optional[int] = None,
+             db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    if budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+    return _spa_rows_with_live_amounts(db, year, budget_type, supplemental_number)
+
+
+@app.post("/api/spa", response_model=schemas.SpaOut)
+def create_spa(payload: schemas.SpaCreate, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    if payload.budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+    _ensure_default_spa_rows(db, payload.year, payload.budget_type, payload.supplemental_number)
+    supp = (payload.supplemental_number or 1) if payload.budget_type == "supplemental" else None
+    max_order = db.query(models.SpecialPurposeAppropriation).filter(
+        models.SpecialPurposeAppropriation.year == payload.year,
+        models.SpecialPurposeAppropriation.budget_type == payload.budget_type,
+        models.SpecialPurposeAppropriation.supplemental_number == supp,
+    ).count()
+    row = models.SpecialPurposeAppropriation(
+        year=payload.year, budget_type=payload.budget_type, supplemental_number=supp,
+        name=payload.name.strip(), amount=payload.amount, auto_computed=None, sort_order=max_order,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return schemas.SpaOut(id=row.id, year=row.year, budget_type=row.budget_type,
+                           supplemental_number=row.supplemental_number, name=row.name,
+                           amount=row.amount, auto_computed=row.auto_computed)
+
+
+@app.put("/api/spa/{spa_id}", response_model=schemas.SpaOut)
+def update_spa(spa_id: int, payload: schemas.SpaUpdate, db: Session = Depends(get_db),
+               admin: models.User = Depends(require_admin)):
+    row = db.query(models.SpecialPurposeAppropriation).get(spa_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Special Purpose Appropriation not found")
+    if row.auto_computed and payload.amount is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="This amount is computed automatically from fund sources and can't be edited directly."
+        )
+    if payload.name is not None:
+        row.name = payload.name.strip()
+    if payload.amount is not None:
+        row.amount = payload.amount
+    db.commit()
+    db.refresh(row)
+    amount = row.amount
+    if row.auto_computed:
+        by_category = _fund_source_totals_by_category(db, row.year, row.budget_type, row.supplemental_number)
+        amount = _compute_dev_fund_20pct(by_category) if row.auto_computed == "dev_fund_20pct" else _compute_ldrrmf_5pct(by_category)
+    return schemas.SpaOut(id=row.id, year=row.year, budget_type=row.budget_type,
+                           supplemental_number=row.supplemental_number, name=row.name,
+                           amount=amount, auto_computed=row.auto_computed)
+
+
+@app.delete("/api/spa/{spa_id}")
+def delete_spa(spa_id: int, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    row = db.query(models.SpecialPurposeAppropriation).get(spa_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Special Purpose Appropriation not found")
+    if row.auto_computed:
+        raise HTTPException(status_code=400, detail="This mandatory deduction can't be removed, only added to below it.")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/api/budget-summary", response_model=schemas.BudgetSummaryOut)
 def budget_summary(year: int, budget_type: str, supplemental_number: Optional[int] = None,
                     db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
@@ -889,16 +1062,23 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
             # matters once a prorated/adjusted amount has been approved.
             total_approved += l.approved_amount or 0
 
+    # Special Purpose Appropriations (mandatory deductions like the 20%
+    # Development Fund and 5% LDRRMF) are committed against available funds
+    # BEFORE offices are allocated anything, so they reduce the balance the
+    # same way office expenditures do.
+    total_spa = _total_spa(db, year, budget_type, supplemental_number)
+
     return schemas.BudgetSummaryOut(
         year=year, budget_type=budget_type,
         supplemental_number=(supplemental_number or 1) if budget_type == "supplemental" else None,
         available_budget=available_budget,
+        total_spa=total_spa,
         total_proposed=total_proposed,
         total_adjusted=total_adjusted,
         total_approved=total_approved,
-        balance_vs_proposed=available_budget - total_proposed,
-        balance_vs_adjusted=available_budget - total_adjusted,
-        balance_vs_approved=available_budget - total_approved,
+        balance_vs_proposed=available_budget - total_spa - total_proposed,
+        balance_vs_adjusted=available_budget - total_spa - total_adjusted,
+        balance_vs_approved=available_budget - total_spa - total_approved,
     )
 
 
@@ -963,6 +1143,48 @@ def summary_report_excel(year: int, budget_type: str, supplemental_number: Optio
     buf = build_summary_workbook(report.model_dump())
     supp_part = f"_No{report.supplemental_number}" if report.supplemental_number else ""
     filename = f"Summary_{budget_type}{supp_part}_{year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/admin/lbp-form1-excel")
+def lbp_form1_excel(year: int, budget_type: str, supplemental_number: Optional[int] = None,
+                     db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """The full 'Budget of Expenditures and Sources of Financing' report
+    (LBP Form No. 1 layout) -- fund sources/receipts, office expenditures by
+    classification, mandatory Special Purpose Appropriations, and the
+    resulting ending balance, all in one document."""
+    report = summary_report(year, budget_type, supplemental_number, db, admin)
+
+    fs_q = db.query(models.FundSource).filter(
+        models.FundSource.year == year, models.FundSource.budget_type == budget_type,
+    )
+    if budget_type == "supplemental":
+        fs_q = fs_q.filter(models.FundSource.supplemental_number == (supplemental_number or 1))
+    else:
+        fs_q = fs_q.filter(models.FundSource.supplemental_number.is_(None))
+    fund_sources = [{"category": fs.category, "particulars": fs.particulars, "amount": fs.amount} for fs in fs_q.all()]
+
+    spa_rows = [
+        {"name": s.name, "amount": s.amount, "auto_computed": s.auto_computed}
+        for s in _spa_rows_with_live_amounts(db, year, budget_type, supplemental_number)
+    ]
+
+    province_setting = db.query(models.AppSetting).filter(models.AppSetting.key == "province_name").first()
+    province_name = province_setting.value_data.decode("utf-8") if province_setting and province_setting.value_data else ""
+
+    data = report.model_dump()
+    data["summary_rows"] = data["rows"]
+    data["fund_sources"] = fund_sources
+    data["spa_rows"] = spa_rows
+    data["province_name"] = province_name
+
+    buf = build_lbp_form1_workbook(data)
+    supp_part = f"_No{report.supplemental_number}" if report.supplemental_number else ""
+    filename = f"LBP_Form1_{budget_type}{supp_part}_{year}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

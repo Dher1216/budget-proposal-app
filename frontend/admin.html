@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20260930">
+<link rel="stylesheet" href="css/app.css?v=20261001">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -157,7 +157,10 @@
           <button class="btn secondary" id="s_load">Load summary</button>
         </div>
         <div class="field">
-          <button class="btn" id="s_download">Download Excel</button>
+          <button class="btn secondary" id="s_download">Download Excel (per-account)</button>
+        </div>
+        <div class="field">
+          <button class="btn" id="s_downloadLbp">Download LBP Form 1</button>
         </div>
       </div>
     </div>
@@ -280,6 +283,28 @@
       </div>
     </div>
 
+    <div class="panel" id="spa_result" style="display:none;">
+      <h3 style="margin-top:0;">Special Purpose Appropriations (mandatory deductions)</h3>
+      <p class="hint">These are deducted from Available Budget before offices are allocated anything — the 20% Development Fund and 5% LDRRMF are computed automatically from the fund sources above; Aid to Barangays defaults to ₱590,000 but can be changed; you can add other one-off deductions too.</p>
+      <div class="table-wrap">
+        <table class="data-table" id="spa_table"></table>
+      </div>
+      <div class="filter-row" style="margin-top:12px;">
+        <div class="field" style="flex:2;">
+          <label>New deduction name</label>
+          <input type="text" id="spa_newName" placeholder="e.g. Appropriations for Debt Service">
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" id="spa_newAmount" placeholder="0.00">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="spa_addBtn">Add deduction</button>
+        </div>
+      </div>
+      <div class="status-msg" id="spa_status"></div>
+    </div>
+
     <div class="panel">
       <h3 style="margin-top:0;">Prorate an account by number of months</h3>
       <p class="hint">For accounts like "Other General Services" or "Other Professional Services" used for Job Order / Contract of Service salaries — reduce the whole-year proposed amount down to fund only a set number of months, across every office at once. This writes into each office's <strong>Adjusted Proposal</strong> (and its remarks), leaving the original Proposed amount untouched.</p>
@@ -344,6 +369,20 @@
         </div>
       </div>
       <div class="status-msg" id="o_status"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">Province name</h3>
+      <p class="hint">Used as the header on the LBP Form 1 report (e.g. "Province of Antique").</p>
+      <div class="filter-row">
+        <div class="field" style="flex:2;">
+          <input type="text" id="brand_provinceName" placeholder="e.g. Antique">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="brand_saveProvince">Save</button>
+        </div>
+      </div>
+      <div class="status-msg" id="brand_provinceStatus"></div>
     </div>
 
     <div class="panel">
@@ -460,7 +499,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20260930"></script>
-<script src="js/admin.js?v=20260930"></script>
+<script src="js/api.js?v=20261001"></script>
+<script src="js/admin.js?v=20261001"></script>
 </body>
 </html>

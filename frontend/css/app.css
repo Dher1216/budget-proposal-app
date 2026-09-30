@@ -36,8 +36,8 @@ a{color:var(--accent);}
 }
 .login-logo{
   display:block;
-  max-width:160px;
-  max-height:90px;
+  max-width:240px;
+  max-height:140px;
   margin:0 auto 14px;
 }
 .login-card p.sub{
@@ -168,7 +168,7 @@ table.data-table{
   width:100%;
   border-collapse:separate;
   border-spacing:0;
-  font-size:13px;
+  font-size:15px;
 }
 table.data-table th{
   background:#F1E9FB;
@@ -228,8 +228,8 @@ table.data-table tbody tr:not(.section-row):not(.subtotal-row):hover td{
 }
 .audit-log{ margin-top:16px; }
 .header-logo{
-  width:64px;
-  height:64px;
+  width:96px;
+  height:96px;
   object-fit:contain;
   flex-shrink:0;
 }
