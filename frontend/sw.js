@@ -11,7 +11,7 @@
 // string used on the asset URLs in index.html/admin.html/client.html every
 // time those are updated, so offline users pick up the new version the
 // next time they're online, instead of being stuck on a stale cached copy.
-const CACHE_VERSION = "20261007";
+const CACHE_VERSION = "20261008";
 const CACHE_NAME = `budget-app-shell-v${CACHE_VERSION}`;
 
 const APP_SHELL_URLS = [
@@ -47,13 +47,29 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  // The bare site root ("/") normally 307-redirects to "/app/" -- but that
+  // redirect can't be followed with no network connection at all. When
+  // offline, synthesize the SAME redirect ourselves (this needs no network
+  // or cache lookup -- it's just constructing a response), and the browser
+  // will then request "/app/" itself, which IS handled below from cache.
+  // (Serving /app/'s cached content directly as the body for "/" would
+  // break its relative css/js links, since the browser would resolve them
+  // against the wrong base URL -- redirecting avoids that.)
+  if (url.pathname === "/") {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        Response.redirect(new URL("/app/", url.origin).toString(), 302)
+      )
+    );
+    return;
+  }
 
   // Only handle GET requests for this app's own static files, under /app/.
   // Everything else (API calls under /api/, anything else) passes straight
   // through to the network untouched.
   const isAppShellRequest =
-    event.request.method === "GET" &&
-    url.origin === self.location.origin &&
     url.pathname.startsWith("/app/") &&
     (url.pathname === "/app/" ||
       url.pathname.endsWith(".html") ||

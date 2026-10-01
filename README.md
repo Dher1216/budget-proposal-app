@@ -125,10 +125,13 @@ proposals across offices, then exporting the final report to Excel.
   reopening it later works even with no connection at all — combined with
   the offline write-queue and cached attachments, this means a full
   multi-day disconnected work session (e.g. a budget hearing with no
-  signal) is genuinely supported, not just brief drops. **If you update
-  this app in the future**, remember to bump `CACHE_VERSION` in
-  `frontend/sw.js` to match the `?v=...` value used in the HTML files —
-  otherwise offline users stay stuck on the old cached version.
+  signal) is genuinely supported, not just brief drops. Covers the whole
+  site, whether you're on the bare site address (e.g.
+  `your-app.onrender.com`) or the full `/app/...` page — both work offline.
+  **If you update this app in the future**, remember to bump
+  `CACHE_VERSION` in `frontend/sw.js` to match the `?v=...` value used in
+  the HTML files — otherwise offline users stay stuck on the old cached
+  version.
 
 ## Running it locally (to try it out)
 

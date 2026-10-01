@@ -6,9 +6,24 @@ const API_BASE = "";
 // the pages load even with no internet connection at all (e.g. after a
 // restart while offline). Only caches static files -- never touches API
 // calls, which the rest of this file already handles for offline use.
+//
+// Served from the SITE ROOT ("/sw.js", not "/app/sw.js") so its default
+// scope covers the whole site, including the bare domain -- not just pages
+// under /app/. Also cleans up the old /app/-scoped registration from
+// before this fix, so anyone who already has it ends up with the full
+// site-wide version instead of two overlapping registrations.
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/app/sw.js").catch(() => {
+  window.addEventListener("load", async () => {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        if (reg.scope.endsWith("/app/")) {
+          await reg.unregister();
+        }
+      }
+    } catch (e) { /* not fatal -- registering the new one below still helps */ }
+
+    navigator.serviceWorker.register("/sw.js").catch(() => {
       // Not fatal -- the app still works online, it just won't be able to
       // load itself with zero connectivity until this succeeds once.
     });

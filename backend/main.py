@@ -1634,3 +1634,14 @@ if os.path.isdir(FRONTEND_DIR):
     @app.get("/")
     def root():
         return RedirectResponse(url="/app/")
+
+    @app.get("/sw.js")
+    def service_worker():
+        """Served from the SITE ROOT (not /app/sw.js) specifically so its
+        default registration scope covers the entire origin, including the
+        bare domain -- not just pages under /app/. This matters because
+        people naturally bookmark/type the bare site address, which would
+        otherwise fall outside the service worker's coverage and fail to
+        load offline."""
+        sw_path = os.path.join(FRONTEND_DIR, "sw.js")
+        return FileResponse(sw_path, media_type="application/javascript")
