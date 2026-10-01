@@ -242,7 +242,7 @@ function tableHeader(proposalYear, suppColCount) {
   </tr></thead>`;
 }
 
-function buildRows(lines, { editableApproved = false, editableAdminFields = false, suppColCount = 1 } = {}) {
+function buildRows(lines, { editableApproved = false, editableAdminFields = false, editableOfficeFields = false, suppColCount = 1 } = {}) {
   const byClass = {};
   CLASSIFICATION_ORDER.forEach(c => byClass[c] = []);
   lines.forEach(l => { (byClass[l.classification] ||= []).push(l); });
@@ -283,6 +283,21 @@ function buildRows(lines, { editableApproved = false, editableAdminFields = fals
         ? `<textarea data-account="${l.account_id}" data-field="remarks_adjusted" class="admin-field-input remarks-input" rows="2" placeholder="Reason for adjustment...">${l.remarks_adjusted ?? ""}</textarea>`
         : (l.remarks_adjusted ? l.remarks_adjusted.replace(/</g, "&lt;") : "—");
 
+      // Office-owned fields -- normally read-only here (the office fills
+      // these in), but editable for admin during a locked hearing session
+      // where admin needs full control, including offline.
+      const annualCell = editableOfficeFields
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="current_annual" class="office-field-input" value="${money(l.current_annual ?? 0)}">`
+        : money(l.current_annual);
+
+      const proposedCell = editableOfficeFields
+        ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="proposed_amount" class="office-field-input" value="${money(l.proposed_amount ?? 0)}">`
+        : money(l.proposed_amount);
+
+      const remarksCell = editableOfficeFields
+        ? `<textarea data-account="${l.account_id}" data-field="remarks" class="office-field-input remarks-input" rows="2" placeholder="Justify this amount...">${l.remarks ?? ""}</textarea>`
+        : (l.remarks ? l.remarks.replace(/</g, "&lt;") : "—");
+
       const attachmentsHtml = (l.attachments || []).length
         ? `<div class="attachment-list">${l.attachments.map(a =>
             `<div class="attachment-item"><a href="#" onclick="downloadAttachment(${a.id}, '${a.filename.replace(/'/g, "\\'")}'); return false;">${a.filename}</a></div>`
@@ -290,19 +305,24 @@ function buildRows(lines, { editableApproved = false, editableAdminFields = fals
         : "—";
 
       let suppCells = "";
-      for (let i = 1; i <= suppColCount; i++) suppCells += `<td class="num">${money(suppByNum[i] ?? 0)}</td>`;
+      for (let i = 1; i <= suppColCount; i++) {
+        const val = suppByNum[i] ?? 0;
+        suppCells += `<td class="num">${editableOfficeFields
+          ? `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" data-account="${l.account_id}" data-field="supp" data-supp-num="${i}" class="office-field-input" value="${money(val)}">`
+          : money(val)}</td>`;
+      }
 
       rows += `<tr>
         <td>${l.account_name}</td>
         <td>${l.account_code}</td>
         <td class="num">${prevCell}</td>
-        <td class="num">${money(l.current_annual)}</td>
+        <td class="num">${annualCell}</td>
         ${suppCells}
         <td class="num">${money(l.current_total)}</td>
-        <td class="num">${money(l.proposed_amount)}</td>
+        <td class="num">${proposedCell}</td>
         <td class="num">${money(l.difference)}</td>
         <td class="attachments-cell">${attachmentsHtml}</td>
-        <td class="remarks-cell">${l.remarks ? l.remarks.replace(/</g, "&lt;") : "—"}</td>
+        <td class="remarks-cell">${remarksCell}</td>
         <td class="num">${adjustedCell}</td>
         <td class="remarks-cell">${remarksAdjCell}</td>
         <td class="num">${approvedCell}</td>
@@ -338,6 +358,7 @@ function actionLabel(action) {
     draft_saved: "saved a draft",
     submitted: "submitted the proposal",
     reopened: "reopened the proposal for office editing",
+    locked_by_admin: "locked the proposal for admin editing",
     approved: "saved and locked approved amounts",
     approval_reopened: "reopened the approved amounts for editing",
     attachment_added: "added a supporting document",
@@ -393,7 +414,8 @@ document.getElementById("p_load").addEventListener("click", async () => {
     setOfficeLogo("p_officeLogo", data.office_id);
 
     const statusBadge = document.getElementById("p_statusBadge");
-    statusBadge.textContent = data.status === "submitted" ? "Submitted by office" : "Draft (office still editing)";
+    const isLocked = data.status === "submitted";
+    statusBadge.textContent = isLocked ? "Locked (office cannot edit)" : "Draft (office can edit)";
     statusBadge.className = "badge " + data.status;
 
     const approvalBadge = document.getElementById("p_approvalBadge");
@@ -407,16 +429,110 @@ document.getElementById("p_load").addEventListener("click", async () => {
       ? "Approved amounts are locked. Click \"Reopen approved amounts\" to change them — this does not affect the office's submission."
       : "Enter approved amounts below, then click \"Save approved amounts\" to lock them in.";
 
+    document.getElementById("p_lockBtn").style.display = isLocked ? "none" : "inline-block";
+    document.getElementById("p_lockNote").textContent = isLocked
+      ? "Locked — the office can't edit this right now, so every field below (including the office's own) is editable by you, including while offline. Click \"Reopen for office editing\" when you're done to hand control back."
+      : "This proposal is still open for the office to edit. Click \"Lock for admin editing\" before editing the office's own fields yourself — this avoids your changes and the office's changes colliding, especially if you'll be working offline.";
+
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("p_table").innerHTML =
       tableHeader(data.year, suppColCount) + "<tbody>" +
-      buildRows(data.lines, { editableApproved: !isApproved, editableAdminFields: true, suppColCount }) +
+      buildRows(data.lines, { editableApproved: !isApproved, editableAdminFields: true, editableOfficeFields: isLocked, suppColCount }) +
       "</tbody>";
     if (fromCache) { statusEl.textContent = "Showing last saved data (offline)."; statusEl.className = "status-msg"; }
     loadAuditLog(data.id, "p_auditLog");
     loadBalance(year, budget_type, supp, "p_balancePanel");
+
+    // Cache this proposal's attachments so they can be opened with no
+    // connection later (e.g. during a hearing with poor signal).
+    data.lines.forEach(l => (l.attachments || []).forEach(a => cacheAttachmentForOffline(a.id)));
   } catch (err) {
     statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("p_lockBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("p_status");
+  if (!currentProposal) return;
+  if (!confirm("Lock this proposal so the office can't edit it? You'll then be able to edit every field yourself, including offline. Click \"Reopen for office editing\" later to hand control back.")) return;
+  try {
+    const result = await offlineAwareSend("PUT", `/api/proposal/${currentProposal.id}/lock`, {}, "Lock proposal for admin editing");
+    if (result.queued) {
+      statusEl.textContent = "You're offline — this will lock as soon as you're back online.";
+      statusEl.className = "status-msg";
+    } else {
+      statusEl.textContent = "Locked. You can now edit every field, including offline.";
+      statusEl.className = "status-msg ok";
+      document.getElementById("p_load").click();
+    }
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+function currentCycleSelection() {
+  return {
+    year: document.getElementById("p_year").value,
+    budget_type: document.getElementById("p_type").value,
+    supplemental_number: document.getElementById("p_supplementalNumber").value,
+  };
+}
+
+document.getElementById("p_bulkLockBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("p_bulkStatus");
+  const { year, budget_type, supplemental_number } = currentCycleSelection();
+  const cycleLabel = budget_type === "supplemental" ? `Supplemental No. ${supplemental_number}, ${year}` : `Annual, ${year}`;
+  if (!confirm(`Lock EVERY office's existing proposal for ${cycleLabel}? Offices won't be able to edit until you unlock them, individually or in bulk.`)) return;
+  let path = `/api/proposals/bulk-lock?year=${year}&budget_type=${budget_type}`;
+  if (budget_type === "supplemental") path += `&supplemental_number=${supplemental_number}`;
+  try {
+    const result = await apiPut(path, {});
+    statusEl.textContent = `Locked ${result.locked_count} proposal(s) (${result.already_locked_count} were already locked). ${result.total_proposals} office(s) have started a proposal for this cycle.`;
+    statusEl.className = "status-msg ok";
+    if (currentProposal) document.getElementById("p_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("p_bulkUnlockBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("p_bulkStatus");
+  const { year, budget_type, supplemental_number } = currentCycleSelection();
+  const cycleLabel = budget_type === "supplemental" ? `Supplemental No. ${supplemental_number}, ${year}` : `Annual, ${year}`;
+  if (!confirm(`Unlock EVERY office's proposal for ${cycleLabel}, handing editing control back to each office?`)) return;
+  let path = `/api/proposals/bulk-unlock?year=${year}&budget_type=${budget_type}`;
+  if (budget_type === "supplemental") path += `&supplemental_number=${supplemental_number}`;
+  try {
+    const result = await apiPut(path, {});
+    statusEl.textContent = `Unlocked ${result.unlocked_count} proposal(s) (${result.already_unlocked_count} were already unlocked). ${result.total_proposals} office(s) have started a proposal for this cycle.`;
+    statusEl.className = "status-msg ok";
+    if (currentProposal) document.getElementById("p_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+document.getElementById("p_syncNowBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("p_status");
+  statusEl.textContent = "Syncing...";
+  statusEl.className = "status-msg";
+  const result = await syncPendingWrites();
+  if (result.alreadyRunning) {
+    statusEl.textContent = "A sync is already in progress — give it a moment.";
+    statusEl.className = "status-msg";
+  } else if (result.total === 0) {
+    statusEl.textContent = "Nothing waiting to sync.";
+    statusEl.className = "status-msg";
+  } else if (result.failed === 0) {
+    statusEl.textContent = `Synced ${result.succeeded} change(s).`;
+    statusEl.className = "status-msg ok";
+    if (currentProposal) document.getElementById("p_load").click();
+  } else {
+    statusEl.textContent = `Synced ${result.succeeded} of ${result.total} — still offline or an error occurred for the rest. Try again once you have a connection.`;
     statusEl.className = "status-msg error";
   }
 });
@@ -424,22 +540,60 @@ document.getElementById("p_load").addEventListener("click", async () => {
 document.getElementById("p_saveAdminFieldsBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("p_status");
   if (!currentProposal) return;
-  const inputs = document.querySelectorAll(".admin-field-input");
-  const byAccount = {};
-  inputs.forEach(inp => {
+
+  // Admin-only fields (always editable): Previous Year Actual, Adjusted Proposal, its remarks.
+  const adminInputs = document.querySelectorAll(".admin-field-input");
+  const adminByAccount = {};
+  adminInputs.forEach(inp => {
     const id = inp.dataset.account;
-    byAccount[id] ||= { account_id: Number(id) };
+    adminByAccount[id] ||= { account_id: Number(id) };
     if (inp.dataset.field === "remarks_adjusted") {
-      byAccount[id].remarks_adjusted = inp.value;
+      adminByAccount[id].remarks_adjusted = inp.value;
     } else {
-      byAccount[id][inp.dataset.field] = inp.value === "" ? null : parseMoney(inp.value);
+      adminByAccount[id][inp.dataset.field] = inp.value === "" ? null : parseMoney(inp.value);
     }
   });
+
+  // Office-owned fields -- only present/editable when this proposal is locked.
+  const officeInputs = document.querySelectorAll(".office-field-input");
+  const officeByAccount = {};
+  officeInputs.forEach(inp => {
+    const id = inp.dataset.account;
+    officeByAccount[id] ||= { account_id: Number(id) };
+    if (inp.dataset.field === "remarks") {
+      officeByAccount[id].remarks = inp.value;
+    } else if (inp.dataset.field === "supp") {
+      officeByAccount[id].current_supplementals ||= {};
+      officeByAccount[id].current_supplementals[inp.dataset.suppNum] = parseMoney(inp.value);
+    } else {
+      officeByAccount[id][inp.dataset.field] = parseMoney(inp.value);
+    }
+  });
+
+  let anyQueued = false;
   try {
-    await apiPut(`/api/proposal/${currentProposal.id}/admin-lines`, { lines: Object.values(byAccount) });
-    statusEl.textContent = "Previous Year Actual and Adjusted Proposal fields saved.";
-    statusEl.className = "status-msg ok";
-    document.getElementById("p_load").click();
+    const adminResult = await offlineAwareSend(
+      "PUT", `/api/proposal/${currentProposal.id}/admin-lines`,
+      { lines: Object.values(adminByAccount) }, "Save Previous Year Actual / Adjusted Proposal"
+    );
+    if (adminResult.queued) anyQueued = true;
+
+    if (officeInputs.length) {
+      const officeResult = await offlineAwareSend(
+        "PUT", `/api/proposal/${currentProposal.id}/lines`,
+        { lines: Object.values(officeByAccount), submit: false }, "Save office fields (admin editing while locked)"
+      );
+      if (officeResult.queued) anyQueued = true;
+    }
+
+    if (anyQueued) {
+      statusEl.textContent = "You're offline — these changes are saved on this device and will sync automatically once you're back online.";
+      statusEl.className = "status-msg";
+    } else {
+      statusEl.textContent = "All changes saved.";
+      statusEl.className = "status-msg ok";
+      document.getElementById("p_load").click();
+    }
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.className = "status-msg error";

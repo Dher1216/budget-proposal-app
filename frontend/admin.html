@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261003">
+<link rel="stylesheet" href="css/app.css?v=20261006">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -54,6 +54,12 @@
           <button class="btn secondary" id="p_load">Load proposal</button>
         </div>
       </div>
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line);">
+        <p class="hint" style="margin-top:0;">Bulk actions apply to every office's proposal for the Budget type / Year / Supplemental No. selected above — not just the office picked for loading.</p>
+        <button class="btn secondary" id="p_bulkLockBtn">Lock ALL offices for this cycle</button>
+        <button class="btn secondary" id="p_bulkUnlockBtn">Unlock ALL offices for this cycle</button>
+        <div class="status-msg" id="p_bulkStatus"></div>
+      </div>
     </div>
 
     <div class="panel" id="p_result" style="display:none;">
@@ -69,12 +75,18 @@
           </div>
         </div>
         <div>
+          <button class="btn secondary" id="p_lockBtn" style="display:none;">Lock for admin editing (offline-safe)</button>
           <button class="btn secondary" id="p_reopenBtn">Reopen for office editing</button>
           <button class="btn secondary" id="p_reopenApprovalBtn" style="display:none;">Reopen approved amounts</button>
           <button class="btn secondary" id="p_saveAdminFieldsBtn">Save Previous Year Actual &amp; Adjustments</button>
           <button class="btn" id="p_approveBtn">Save approved amounts</button>
         </div>
       </div>
+      <div style="margin-top:8px;">
+        <span class="badge pending" id="pendingSyncBadge" style="display:none;"></span>
+        <button class="btn secondary" id="p_syncNowBtn" style="padding:4px 10px; font-size:12.5px;">Sync now</button>
+      </div>
+      <p class="hint" id="p_lockNote"></p>
       <p class="hint" id="p_approvalNote"></p>
       <div class="table-scroll-hint">Scroll sideways to see all columns — Object of Expenditures and Approved stay pinned in view.</div>
       <div class="table-wrap" style="margin-top:6px;">
@@ -521,7 +533,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261003"></script>
-<script src="js/admin.js?v=20261003"></script>
+<script src="js/api.js?v=20261006"></script>
+<script src="js/admin.js?v=20261006"></script>
 </body>
 </html>

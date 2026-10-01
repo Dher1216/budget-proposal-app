@@ -98,6 +98,32 @@ proposals across offices, then exporting the final report to Excel.
   password — passwords are stored as one-way hashes (the secure standard),
   which can't be reversed into the original text. Resetting to a new known
   password is the secure equivalent.
+- **Offline editing for admin** (Proposals tab) — click "Lock for admin
+  editing" on a proposal to prevent the office from editing it, then every
+  field (including the office's own) becomes editable by admin, including
+  with no internet connection — useful during a budget hearing with poor
+  signal. Edits made offline are saved on your device and sync
+  automatically once you're back online (or click "Sync now"). Attached
+  PDFs are cached for offline viewing once opened while online. This is
+  designed for a single admin device working on a locked proposal at a
+  time — locking it first is what keeps this safe, since the office can't
+  make conflicting edits while you're working on it.
+- **Bulk lock/unlock** (Proposals tab) — lock or unlock every office's
+  existing proposal for a given year/budget type/supplemental number at
+  once, instead of one office at a time — handy right before and after a
+  hearing day. Only affects offices that have actually started a proposal
+  for that cycle.
+- **The app loads with zero internet connection** (not just intermittent —
+  genuinely no signal, including after a laptop restart or the browser
+  being fully closed and reopened). After visiting the app once while
+  online, a service worker keeps a local copy of its own pages, so
+  reopening it later works even with no connection at all — combined with
+  the offline write-queue and cached attachments, this means a full
+  multi-day disconnected work session (e.g. a budget hearing with no
+  signal) is genuinely supported, not just brief drops. **If you update
+  this app in the future**, remember to bump `CACHE_VERSION` in
+  `frontend/sw.js` to match the `?v=...` value used in the HTML files —
+  otherwise offline users stay stuck on the old cached version.
 
 ## Running it locally (to try it out)
 

@@ -2,6 +2,19 @@
 // by the same FastAPI app (the default), leave this empty.
 const API_BASE = "";
 
+// Registers the service worker that caches this app's own HTML/CSS/JS so
+// the pages load even with no internet connection at all (e.g. after a
+// restart while offline). Only caches static files -- never touches API
+// calls, which the rest of this file already handles for offline use.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/app/sw.js").catch(() => {
+      // Not fatal -- the app still works online, it just won't be able to
+      // load itself with zero connectivity until this succeeds once.
+    });
+  });
+}
+
 function getToken() { return localStorage.getItem("budget_token"); }
 function getRole() { return localStorage.getItem("budget_role"); }
 function getOfficeId() { return localStorage.getItem("budget_office_id"); }
@@ -123,17 +136,20 @@ function attachmentDownloadUrl(id) {
 
 async function downloadAttachment(id, filename) {
   try {
-    const res = await fetch(attachmentDownloadUrl(id), {
-      headers: { "Authorization": "Bearer " + getToken() }
-    });
-    if (!res.ok) throw new Error("Could not download — check your connection.");
-    const blob = await res.blob();
+    let blob = await getCachedAttachment(id);
+    if (!blob) {
+      const res = await fetch(attachmentDownloadUrl(id), {
+        headers: { "Authorization": "Bearer " + getToken() }
+      });
+      if (!res.ok) throw new Error("Could not download — check your connection.");
+      blob = await res.blob();
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
   } catch (err) {
-    alert(err.message);
+    alert(navigator.onLine ? err.message : "This file isn't available offline yet — it needs to be opened once while online first.");
   }
 }
 
@@ -149,6 +165,161 @@ document.addEventListener("DOMContentLoaded", updateOfflineBanner);
 function money(n) {
   n = Number(n || 0);
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ======================================================================
+// Offline support: queues writes made with no connection (so they aren't
+// lost, just delayed) and caches attachment files locally so they can be
+// opened with no connection. Intended for a SINGLE admin device working
+// on a proposal that's been locked (so the office can't also be editing
+// it at the same time) -- e.g. during a budget hearing with poor signal.
+// ======================================================================
+
+const OFFLINE_DB_NAME = "budget_offline";
+const OFFLINE_DB_VERSION = 1;
+let _offlineDbPromise = null;
+
+function openOfflineDb() {
+  if (_offlineDbPromise) return _offlineDbPromise;
+  _offlineDbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("pendingWrites")) {
+        db.createObjectStore("pendingWrites", { keyPath: "id", autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains("attachmentCache")) {
+        db.createObjectStore("attachmentCache", { keyPath: "attachmentId" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return _offlineDbPromise;
+}
+
+async function queuePendingWrite(method, path, body, description) {
+  const db = await openOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pendingWrites", "readwrite");
+    tx.objectStore("pendingWrites").add({ method, path, body, description, queuedAt: new Date().toISOString() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getPendingWrites() {
+  const db = await openOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pendingWrites", "readonly");
+    const req = tx.objectStore("pendingWrites").getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function removePendingWrite(id) {
+  const db = await openOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pendingWrites", "readwrite");
+    tx.objectStore("pendingWrites").delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// Tries a write immediately; if the network itself is unreachable (not just
+// a server error), queues it instead of failing, so the user's edit isn't
+// lost. Returns { queued: true } or { queued: false, data }.
+async function offlineAwareSend(method, path, body, description) {
+  try {
+    const data = await apiSend(method, path, body);
+    return { queued: false, data };
+  } catch (err) {
+    if (err instanceof TypeError || err.message === "Failed to fetch" || !navigator.onLine) {
+      await queuePendingWrite(method, path, body, description);
+      updatePendingSyncBadge();
+      return { queued: true };
+    }
+    throw err; // a real server error (e.g. validation) -- don't hide it by queueing
+  }
+}
+
+let _syncInProgress = false;
+
+async function syncPendingWrites(onProgress) {
+  if (_syncInProgress) {
+    return { succeeded: 0, failed: 0, total: 0, alreadyRunning: true };
+  }
+  _syncInProgress = true;
+  try {
+    const writes = await getPendingWrites();
+    let succeeded = 0, failed = 0;
+    for (const w of writes) {
+      try {
+        await apiSend(w.method, w.path, w.body);
+        await removePendingWrite(w.id);
+        succeeded++;
+      } catch (err) {
+        failed++; // leave it queued, try again next sync
+      }
+      if (onProgress) onProgress(succeeded + failed, writes.length);
+    }
+    updatePendingSyncBadge();
+    return { succeeded, failed, total: writes.length };
+  } finally {
+    _syncInProgress = false;
+  }
+}
+
+async function updatePendingSyncBadge() {
+  const badge = document.getElementById("pendingSyncBadge");
+  if (!badge) return;
+  try {
+    const writes = await getPendingWrites();
+    if (writes.length > 0) {
+      badge.textContent = `${writes.length} change(s) waiting to sync`;
+      badge.style.display = "inline-block";
+    } else {
+      badge.style.display = "none";
+    }
+  } catch (e) { /* IndexedDB not available -- ignore */ }
+}
+
+window.addEventListener("online", () => {
+  syncPendingWrites().then(result => {
+    if (result.total > 0) updatePendingSyncBadge();
+  });
+});
+document.addEventListener("DOMContentLoaded", updatePendingSyncBadge);
+
+// ---- attachment caching for offline viewing ----
+
+async function cacheAttachmentForOffline(attachmentId) {
+  try {
+    const res = await fetch(attachmentDownloadUrl(attachmentId), {
+      headers: { Authorization: "Bearer " + getToken() }
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const db = await openOfflineDb();
+    const tx = db.transaction("attachmentCache", "readwrite");
+    tx.objectStore("attachmentCache").put({ attachmentId, blob, cachedAt: new Date().toISOString() });
+  } catch (err) { /* offline or failed -- just skip caching this one */ }
+}
+
+async function getCachedAttachment(attachmentId) {
+  try {
+    const db = await openOfflineDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction("attachmentCache", "readonly");
+      const req = tx.objectStore("attachmentCache").get(attachmentId);
+      req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) {
+    return null;
+  }
 }
 
 // Formats a text input as the user types: 1234567 -> 1,234,567 (keeps up to

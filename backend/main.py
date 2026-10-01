@@ -680,6 +680,65 @@ def reopen_proposal(proposal_id: int, db: Session = Depends(get_db), user: model
     return proposal_to_out(proposal)
 
 
+@app.put("/api/proposal/{proposal_id}/lock", response_model=schemas.ProposalOut)
+def lock_proposal_for_admin(proposal_id: int, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """Locks a proposal so the OFFICE can no longer edit it -- intended for
+    when admin is about to work on it directly (e.g. during a budget
+    hearing, including offline), and needs to be the only one making
+    changes to avoid the office's edits colliding with admin's. Technically
+    the same lock as a normal submission, just admin-triggered and logged
+    distinctly so it's clear why it happened."""
+    proposal = db.query(models.Proposal).get(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    proposal.status = models.ProposalStatus.submitted
+    log_action(db, proposal, admin, "locked_by_admin",
+               "Locked by admin — the office cannot edit until this is reopened.")
+    db.commit()
+    db.refresh(proposal)
+    return proposal_to_out(proposal)
+
+
+@app.put("/api/proposals/bulk-lock")
+def bulk_lock_proposals(year: int, budget_type: str, supplemental_number: Optional[int] = None,
+                         db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """Locks every office's EXISTING proposal for this budget cycle at once
+    -- e.g. before a hearing day, instead of locking each office one at a
+    time. Only affects proposals that already exist (an office that hasn't
+    started one yet has nothing to lock)."""
+    if budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+    proposals = _matching_proposals(db, year, budget_type, supplemental_number)
+    locked = 0
+    for p in proposals:
+        if p.status != models.ProposalStatus.submitted:
+            p.status = models.ProposalStatus.submitted
+            log_action(db, p, admin, "locked_by_admin",
+                       "Locked by admin (bulk action) — the office cannot edit until this is reopened.")
+            locked += 1
+    db.commit()
+    return {"locked_count": locked, "already_locked_count": len(proposals) - locked, "total_proposals": len(proposals)}
+
+
+@app.put("/api/proposals/bulk-unlock")
+def bulk_unlock_proposals(year: int, budget_type: str, supplemental_number: Optional[int] = None,
+                           db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """Reopens every office's proposal for this budget cycle at once --
+    e.g. after a hearing day ends, handing editing control back to every
+    office in one action instead of one at a time."""
+    if budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+    proposals = _matching_proposals(db, year, budget_type, supplemental_number)
+    unlocked = 0
+    for p in proposals:
+        if p.status != models.ProposalStatus.draft:
+            p.status = models.ProposalStatus.draft
+            log_action(db, p, admin, "reopened", "Reopened for editing by the admin (bulk action)")
+            unlocked += 1
+    db.commit()
+    return {"unlocked_count": unlocked, "already_unlocked_count": len(proposals) - unlocked, "total_proposals": len(proposals)}
+
+
 @app.put("/api/proposal/{proposal_id}/approve", response_model=schemas.ProposalOut)
 def approve_lines(proposal_id: int, payload: schemas.ApproveLinesRequest,
                    db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):

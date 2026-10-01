@@ -328,6 +328,7 @@ table.data-table tbody tr:not(.section-row):not(.subtotal-row):hover td{
 .badge.submitted{ background:#C9E4D9; color:#164A34; }
 .badge.pending{ background:#F1E9FB; color:#5B3A94; }
 .badge.approved{ background:#D9F0DC; color:#1E5E2A; }
+.badge.pending{ background:#FBE4E4; color:#8A2525; margin-right:8px; }
 
 .status-msg{ font-size:13.5px; margin-top:10px; min-height:16px; }
 .status-msg.ok{ color:var(--accent); }
