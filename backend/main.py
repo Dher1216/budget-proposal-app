@@ -86,6 +86,7 @@ def proposal_to_out(p: models.Proposal) -> schemas.ProposalOut:
         supplemental_number=p.supplemental_number,
         status=p.status.value if hasattr(p.status, "value") else p.status,
         approval_status=p.approval_status.value if hasattr(p.approval_status, "value") else p.approval_status,
+        locked_by_admin=p.locked_by_admin,
         lines=[line_to_out(l) for l in lines],
     )
 
@@ -672,7 +673,13 @@ def reopen_proposal(proposal_id: int, db: Session = Depends(get_db), user: model
     # proposal -- it's the same underlying record (unique per office+year+
     # budget_type+supplemental_number), just switched back to editable.
     enforce_office_access(user, proposal.office_id)
+    if user.role == models.Role.client and proposal.locked_by_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="This proposal was locked by the admin (e.g. for a hearing) and can only be reopened by them."
+        )
     proposal.status = models.ProposalStatus.draft
+    proposal.locked_by_admin = False
     who = "the admin" if user.role == models.Role.admin else "the office"
     log_action(db, proposal, user, "reopened", f"Reopened for editing by {who}")
     db.commit()
@@ -692,6 +699,7 @@ def lock_proposal_for_admin(proposal_id: int, db: Session = Depends(get_db), adm
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal.status = models.ProposalStatus.submitted
+    proposal.locked_by_admin = True
     log_action(db, proposal, admin, "locked_by_admin",
                "Locked by admin — the office cannot edit until this is reopened.")
     db.commit()
@@ -711,8 +719,9 @@ def bulk_lock_proposals(year: int, budget_type: str, supplemental_number: Option
     proposals = _matching_proposals(db, year, budget_type, supplemental_number)
     locked = 0
     for p in proposals:
-        if p.status != models.ProposalStatus.submitted:
+        if p.status != models.ProposalStatus.submitted or not p.locked_by_admin:
             p.status = models.ProposalStatus.submitted
+            p.locked_by_admin = True
             log_action(db, p, admin, "locked_by_admin",
                        "Locked by admin (bulk action) — the office cannot edit until this is reopened.")
             locked += 1
@@ -733,6 +742,7 @@ def bulk_unlock_proposals(year: int, budget_type: str, supplemental_number: Opti
     for p in proposals:
         if p.status != models.ProposalStatus.draft:
             p.status = models.ProposalStatus.draft
+            p.locked_by_admin = False
             log_action(db, p, admin, "reopened", "Reopened for editing by the admin (bulk action)")
             unlocked += 1
     db.commit()

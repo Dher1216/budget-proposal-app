@@ -171,10 +171,20 @@ function renderProposal(data, fromCache) {
   const badge = document.getElementById("c_statusBadge");
   badge.textContent = data.status;
   badge.className = "badge " + data.status;
-  document.getElementById("c_lockNote").style.display = editable ? "none" : "block";
+
+  if (data.locked_by_admin) {
+    document.getElementById("c_lockNote").style.display = "block";
+    document.getElementById("c_lockNote").textContent =
+      "This proposal has been locked by the admin (e.g. for a budget hearing). Only the admin can reopen it — please contact them if you need to make changes.";
+    document.getElementById("c_editBtn").style.display = "none";
+  } else {
+    document.getElementById("c_lockNote").style.display = editable ? "none" : "block";
+    document.getElementById("c_lockNote").textContent =
+      "This proposal has been submitted. Click \"Edit this proposal\" if you need to make corrections — it stays the same proposal (no duplicate is created), it just reopens for editing.";
+    document.getElementById("c_editBtn").style.display = editable ? "none" : "inline-block";
+  }
   document.getElementById("c_saveBtn").disabled = !editable;
   document.getElementById("c_submitBtn").disabled = !editable;
-  document.getElementById("c_editBtn").style.display = editable ? "none" : "inline-block";
   document.getElementById("c_addSupplementalBtn").style.display = editable ? "inline-block" : "none";
 
   const suppColCount = maxSupplementalCount(data.lines);

@@ -11,7 +11,7 @@
 // string used on the asset URLs in index.html/admin.html/client.html every
 // time those are updated, so offline users pick up the new version the
 // next time they're online, instead of being stuck on a stale cached copy.
-const CACHE_VERSION = "20261006";
+const CACHE_VERSION = "20261007";
 const CACHE_NAME = `budget-app-shell-v${CACHE_VERSION}`;
 
 const APP_SHELL_URLS = [

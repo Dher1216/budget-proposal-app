@@ -17,6 +17,11 @@ proposals across offices, then exporting the final report to Excel.
 
 ## How the roles work
 
+- **Two kinds of "locked"**: a normal office submission (the office can
+  still self-reopen their own proposal to make corrections) vs. an
+  admin-placed lock (e.g. for a hearing or offline editing) — which only
+  admin can reopen. Both look like "submitted" status, but the office's
+  self-reopen button correctly won't appear on an admin-placed lock.
 - **Admin** (`Dher`, plus any other admins you create) can see every office,
   every year, both annual and supplemental proposals; can add offices,
   accounts, and users; enters **Previous Year Actual** and **Adjusted

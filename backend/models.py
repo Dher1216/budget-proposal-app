@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint, Enum, Text, LargeBinary
+    Column, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint, Enum, Text, LargeBinary, Boolean
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -117,6 +117,10 @@ class Proposal(Base):
     # `approval_status` = admin's own pending/approved state for the Approved
     # column. Reopening one must never flip the other.
     approval_status = Column(Enum(ApprovalStatus), default=ApprovalStatus.pending, nullable=False)
+    # True only when admin used "Lock for admin editing" (or bulk-lock) --
+    # distinguishes this from a normal office submission, which uses the
+    # same underlying status but should still let the office self-reopen it.
+    locked_by_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     submitted_at = Column(DateTime, nullable=True)
     last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

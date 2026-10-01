@@ -131,6 +131,7 @@ class ProposalOut(BaseModel):
     supplemental_number: Optional[int] = None
     status: str
     approval_status: str
+    locked_by_admin: bool = False
     lines: List[ProposalLineOut]
 
 

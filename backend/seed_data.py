@@ -18,24 +18,32 @@ def ensure_new_columns():
     alters an EXISTING table to add new columns. That's fine for a fresh
     local SQLite file (always rebuilt from scratch), but it's a real problem
     for a live production database (Neon) that already has real data in
-    tables like 'offices' from before these columns existed. This adds any
-    missing columns safely, without touching existing data, and does
-    nothing if they're already present (safe to run every deploy)."""
+    tables like 'offices' and 'proposals' from before these columns
+    existed. This adds any missing columns safely, without touching
+    existing data, and does nothing if they're already present (safe to
+    run every deploy)."""
     inspector = inspect(engine)
-    if "offices" not in inspector.get_table_names():
-        return  # brand new database -- create_all() below will make it correctly from scratch
-
-    existing_cols = {c["name"] for c in inspector.get_columns("offices")}
     is_postgres = engine.dialect.name == "postgresql"
     blob_type = "BYTEA" if is_postgres else "BLOB"
+    boolean_type = "BOOLEAN" if is_postgres else "INTEGER"
+    existing_tables = inspector.get_table_names()
 
     with engine.begin() as conn:
-        if "logo_data" not in existing_cols:
-            conn.execute(text(f"ALTER TABLE offices ADD COLUMN logo_data {blob_type}"))
-            print("Migration: added offices.logo_data")
-        if "logo_content_type" not in existing_cols:
-            conn.execute(text("ALTER TABLE offices ADD COLUMN logo_content_type VARCHAR"))
-            print("Migration: added offices.logo_content_type")
+        if "offices" in existing_tables:
+            existing_cols = {c["name"] for c in inspector.get_columns("offices")}
+            if "logo_data" not in existing_cols:
+                conn.execute(text(f"ALTER TABLE offices ADD COLUMN logo_data {blob_type}"))
+                print("Migration: added offices.logo_data")
+            if "logo_content_type" not in existing_cols:
+                conn.execute(text("ALTER TABLE offices ADD COLUMN logo_content_type VARCHAR"))
+                print("Migration: added offices.logo_content_type")
+
+        if "proposals" in existing_tables:
+            existing_cols = {c["name"] for c in inspector.get_columns("proposals")}
+            if "locked_by_admin" not in existing_cols:
+                default_clause = "DEFAULT FALSE" if is_postgres else "DEFAULT 0"
+                conn.execute(text(f"ALTER TABLE proposals ADD COLUMN locked_by_admin {boolean_type} NOT NULL {default_clause}"))
+                print("Migration: added proposals.locked_by_admin")
 
 # classification, code, name
 ACCOUNTS = [
