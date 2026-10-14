@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261014b">
+<link rel="stylesheet" href="css/app.css?v=20261014c">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -236,6 +236,20 @@
       </div>
       <div class="status-msg" id="a_status"></div>
     </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">Find &amp; merge duplicate accounts</h3>
+      <p class="hint">
+        Catches accounts that are really the same thing but got typed slightly differently somewhere
+        (a spelling slip in an imported workbook is the usual cause), so you end up with two account
+        rows splitting one office's data between them. Merging moves all proposal data onto the account
+        you keep and removes the other — safe to re-run any time.
+      </p>
+      <button class="btn secondary" id="a_findDupesBtn">Scan for duplicates</button>
+      <div class="status-msg" id="a_dupesStatus"></div>
+      <div id="a_dupesGroups" style="margin-top:12px;"></div>
+    </div>
+
     <div class="panel">
       <div class="filter-row" style="margin-bottom:10px;">
         <div class="field">
@@ -602,7 +616,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261014b"></script>
-<script src="js/admin.js?v=20261014b"></script>
+<script src="js/api.js?v=20261014c"></script>
+<script src="js/admin.js?v=20261014c"></script>
 </body>
 </html>

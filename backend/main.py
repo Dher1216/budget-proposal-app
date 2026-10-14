@@ -1,6 +1,8 @@
 import os
 import io
 import json
+import re
+import difflib
 import zipfile
 from datetime import datetime
 from typing import Optional, List
@@ -502,6 +504,187 @@ def delete_account(account_id: int, db: Session = Depends(get_db), admin: models
     db.delete(acc)
     db.commit()
     return {"ok": True}
+
+
+def _normalize_account_name(name: str) -> str:
+    """Loose normalization for spotting likely-duplicate account names --
+    lowercase, collapse whitespace, drop trailing punctuation and a few
+    characters that commonly differ between re-typed versions of the same
+    name (periods, extra spaces around '&', double spaces, etc)."""
+    n = re.sub(r"\s+", " ", name.strip().lower())
+    n = n.replace(".", "").replace(",", "")
+    n = re.sub(r"\s*&\s*", " & ", n)
+    return n.strip()
+
+
+@app.get("/api/admin/accounts/duplicate-candidates")
+def duplicate_account_candidates(db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """Groups chart-of-accounts entries that look like the same account
+    typed slightly differently (e.g. a spelling slip in an imported
+    workbook), so admin can review and merge them. Two confidence tiers:
+    'normalized_match' (same after lowercasing/punctuation-stripping --
+    very likely a real duplicate) and 'similar' (close by fuzzy text
+    match, same classification -- needs a closer look since two genuinely
+    different accounts can still read similarly)."""
+    accounts = db.query(models.Account).all()
+
+    by_normalized = {}
+    for a in accounts:
+        by_normalized.setdefault(_normalize_account_name(a.name), []).append(a)
+
+    groups = []
+    grouped_ids = set()
+    for norm, accs in by_normalized.items():
+        if len(accs) > 1:
+            groups.append({
+                "confidence": "normalized_match",
+                "accounts": [
+                    {"id": a.id, "name": a.name, "code": a.code, "classification": a.classification.value}
+                    for a in sorted(accs, key=lambda x: x.id)
+                ],
+            })
+            grouped_ids.update(a.id for a in accs)
+
+    # fuzzy pass, same classification only, skip anything already grouped above
+    remaining = [a for a in accounts if a.id not in grouped_ids]
+    seen_pairs = set()
+    fuzzy_clusters = {}  # account id -> cluster list
+    for i, a in enumerate(remaining):
+        for b in remaining[i + 1:]:
+            if a.classification != b.classification:
+                continue
+            pair = tuple(sorted((a.id, b.id)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            ratio = difflib.SequenceMatcher(None, _normalize_account_name(a.name), _normalize_account_name(b.name)).ratio()
+            if ratio >= 0.86:
+                cluster = fuzzy_clusters.get(a.id) or fuzzy_clusters.get(b.id) or []
+                if a not in cluster:
+                    cluster.append(a)
+                if b not in cluster:
+                    cluster.append(b)
+                for acc in cluster:
+                    fuzzy_clusters[acc.id] = cluster
+
+    seen_cluster_ids = set()
+    for acc_id, cluster in fuzzy_clusters.items():
+        key = tuple(sorted(a.id for a in cluster))
+        if key in seen_cluster_ids:
+            continue
+        seen_cluster_ids.add(key)
+        groups.append({
+            "confidence": "similar",
+            "accounts": [
+                {"id": a.id, "name": a.name, "code": a.code, "classification": a.classification.value}
+                for a in sorted(cluster, key=lambda x: x.id)
+            ],
+        })
+
+    return {"groups": groups}
+
+
+@app.post("/api/admin/accounts/merge")
+def merge_accounts(payload: dict, db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    """payload: {keep_account_id, duplicate_account_ids: [...]}. Every
+    proposal line currently filed under a duplicate account is moved onto
+    the kept account (a straight reassignment where the kept account has no
+    line yet for that proposal -- which is the normal case here, since the
+    duplicate only exists because the kept account's line was still blank
+    when the import ran). If BOTH accounts already have real entered data
+    for the same proposal, that one proposal is left alone and reported as
+    a conflict needing a manual look, rather than guessing which value to
+    keep -- the rest of the merge still goes through."""
+    keep_id = payload.get("keep_account_id")
+    dup_ids = payload.get("duplicate_account_ids") or []
+    keep = db.query(models.Account).get(keep_id) if keep_id else None
+    if not keep:
+        raise HTTPException(status_code=400, detail="keep_account_id must be a valid account.")
+    dup_ids = [d for d in dup_ids if d != keep_id]
+    if not dup_ids:
+        raise HTTPException(status_code=400, detail="No duplicate accounts given to merge.")
+
+    def has_real_data(l: models.ProposalLine) -> bool:
+        return (
+            (l.prev_year_actual or 0) != 0 or (l.current_annual or 0) != 0 or
+            any((s.amount or 0) != 0 for s in l.current_supplementals) or
+            (l.proposed_amount or 0) != 0 or (l.adjusted_proposal or None) not in (None, 0) or
+            l.approved_amount not in (None, 0) or (l.remarks or "").strip() != "" or
+            (l.remarks_adjusted or "").strip() != "" or len(l.attachments) > 0
+        )
+
+    lines_moved = 0
+    conflicts = []
+    accounts_merged = []
+
+    for dup_id in dup_ids:
+        dup = db.query(models.Account).get(dup_id)
+        if not dup:
+            continue
+        dup_lines = db.query(models.ProposalLine).filter(models.ProposalLine.account_id == dup_id).all()
+        any_conflict_for_this_account = False
+
+        for dl in dup_lines:
+            keep_line = db.query(models.ProposalLine).filter(
+                models.ProposalLine.proposal_id == dl.proposal_id,
+                models.ProposalLine.account_id == keep_id,
+            ).first()
+
+            if not keep_line:
+                # simple case: just move this line onto the kept account --
+                # preserves attachments/supplementals automatically since
+                # they're keyed off the line, not the account
+                dl.account_id = keep_id
+                lines_moved += 1
+                continue
+
+            if not has_real_data(keep_line):
+                # kept account's line for this proposal is still blank --
+                # copy the duplicate's data over, then drop the duplicate line
+                keep_line.prev_year_actual = dl.prev_year_actual
+                keep_line.current_annual = dl.current_annual
+                keep_line.proposed_amount = dl.proposed_amount
+                keep_line.adjusted_proposal = dl.adjusted_proposal
+                keep_line.remarks_adjusted = dl.remarks_adjusted
+                keep_line.approved_amount = dl.approved_amount
+                keep_line.remarks = dl.remarks
+                for s in list(dl.current_supplementals):
+                    s.proposal_line_id = keep_line.id
+                for att in list(dl.attachments):
+                    att.proposal_line_id = keep_line.id
+                db.delete(dl)
+                lines_moved += 1
+                continue
+
+            if not has_real_data(dl):
+                # duplicate's line is blank -- nothing to keep, just drop it
+                db.delete(dl)
+                continue
+
+            # both have real data -- don't guess, leave both as-is and report it
+            any_conflict_for_this_account = True
+            conflicts.append({
+                "proposal_id": dl.proposal_id,
+                "duplicate_account_id": dup_id,
+                "duplicate_account_name": dup.name,
+            })
+
+        db.flush()
+        if not any_conflict_for_this_account:
+            remaining_lines = db.query(models.ProposalLine).filter(models.ProposalLine.account_id == dup_id).count()
+            if remaining_lines == 0:
+                accounts_merged.append({"id": dup.id, "name": dup.name})
+                db.delete(dup)
+            # else: some lines for this account still have no conflict but
+            # weren't moved for another reason -- leave the account in place
+            # rather than delete one that still has lines pointing at it
+        db.commit()
+
+    return {
+        "lines_moved": lines_moved,
+        "accounts_merged": accounts_merged,
+        "conflicts": conflicts,
+    }
 
 
 # --------------------------------------------------------------- proposals --

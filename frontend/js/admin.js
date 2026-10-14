@@ -811,6 +811,86 @@ document.getElementById("a_add").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------- duplicate account merge --
+
+document.getElementById("a_findDupesBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("a_dupesStatus");
+  const groupsEl = document.getElementById("a_dupesGroups");
+  statusEl.textContent = "Scanning...";
+  statusEl.className = "status-msg";
+  groupsEl.innerHTML = "";
+  try {
+    const { data } = await apiGet("/api/admin/accounts/duplicate-candidates");
+    if (!data.groups.length) {
+      statusEl.textContent = "No likely duplicates found.";
+      statusEl.className = "status-msg ok";
+      return;
+    }
+    statusEl.textContent = `Found ${data.groups.length} group(s) to review.`;
+    statusEl.className = "status-msg";
+    renderDupeGroups(data.groups);
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+function renderDupeGroups(groups) {
+  const groupsEl = document.getElementById("a_dupesGroups");
+  groupsEl.innerHTML = groups.map((g, gIdx) => {
+    const confidenceLabel = g.confidence === "normalized_match"
+      ? `<span class="badge" style="background:#d4edda;color:#155724;">likely the same account</span>`
+      : `<span class="badge" style="background:#FBE4E4;color:#8A2525;">similar — check carefully, could be two different accounts</span>`;
+    const rows = g.accounts.map((a, aIdx) => `
+      <label style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+        <input type="radio" name="dupe_keep_${gIdx}" value="${a.id}" ${aIdx === 0 ? "checked" : ""}>
+        <span><strong>${a.name}</strong> — ${CLASSIFICATION_LABELS[a.classification] || a.classification}, code ${a.code} (id ${a.id})</span>
+      </label>`).join("");
+    return `
+      <div class="panel" style="background:#fff;">
+        ${confidenceLabel}
+        <p class="hint" style="margin-top:6px;">Pick which one to <strong>keep</strong> — the other(s) in this group get merged into it and removed.</p>
+        ${rows}
+        <div style="margin-top:10px;">
+          <button class="btn secondary" style="padding:6px 14px;" onclick="mergeDupeGroup(${gIdx})">Merge this group</button>
+        </div>
+        <div class="status-msg" id="a_dupeGroupStatus_${gIdx}"></div>
+      </div>`;
+  }).join("");
+  // stash the groups so mergeDupeGroup can read ids back out
+  window._dupeGroups = groups;
+}
+
+async function mergeDupeGroup(gIdx) {
+  const groups = window._dupeGroups || [];
+  const group = groups[gIdx];
+  const statusEl = document.getElementById(`a_dupeGroupStatus_${gIdx}`);
+  const checked = document.querySelector(`input[name="dupe_keep_${gIdx}"]:checked`);
+  if (!group || !checked) return;
+  const keepId = Number(checked.value);
+  const dupeIds = group.accounts.map(a => a.id).filter(id => id !== keepId);
+
+  if (!confirm(`Merge ${dupeIds.length} account(s) into "${group.accounts.find(a => a.id === keepId).name}"? All proposal data on the merged-away account(s) moves onto the one you kept. This can't be undone.`)) {
+    return;
+  }
+  statusEl.textContent = "Merging...";
+  statusEl.className = "status-msg";
+  try {
+    const result = await apiPost("/api/admin/accounts/merge", { keep_account_id: keepId, duplicate_account_ids: dupeIds });
+    let msg = `Done — moved ${result.lines_moved} line(s), removed ${result.accounts_merged.length} duplicate account(s).`;
+    if (result.conflicts.length) {
+      msg += ` ${result.conflicts.length} proposal(s) had real data on BOTH accounts and were left untouched — check those manually: ` +
+        result.conflicts.map(c => `proposal #${c.proposal_id} (vs "${c.duplicate_account_name}")`).join(", ");
+    }
+    statusEl.textContent = msg;
+    statusEl.className = result.conflicts.length ? "status-msg error" : "status-msg ok";
+    await loadAccounts();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+}
+
 // ----------------------------------------------------------------- users --
 
 document.getElementById("u_role").addEventListener("change", (e) => {
