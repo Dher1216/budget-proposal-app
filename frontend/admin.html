@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261014">
+<link rel="stylesheet" href="css/app.css?v=20261014b">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -543,8 +543,9 @@
         office's sheet, shows you exactly what it found and which existing office each one matches
         <strong>before anything is saved</strong> — nothing is written to the system until you review the
         matches below and click Confirm &amp; Import. Any account name not already in the chart of
-        accounts is added automatically. Download a backup (Backup &amp; Cleanup tab) first if you want an
-        extra safety net.
+        accounts is added automatically, and any sheet that doesn't match an existing office can create
+        a new office on the spot (you'll still need to add a user account for it afterwards, under the
+        Users tab). Download a backup (Backup &amp; Cleanup tab) first if you want an extra safety net.
       </p>
       <div class="filter-row">
         <div class="field">
@@ -601,7 +602,7 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261014"></script>
-<script src="js/admin.js?v=20261014"></script>
+<script src="js/api.js?v=20261014b"></script>
+<script src="js/admin.js?v=20261014b"></script>
 </body>
 </html>

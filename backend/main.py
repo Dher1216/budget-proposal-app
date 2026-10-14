@@ -1691,9 +1691,11 @@ async def budget_import_preview(
 def budget_import_commit(payload: dict, db: Session = Depends(get_db),
                           admin: models.User = Depends(require_admin)):
     """payload: {year, budget_type, source_label (optional), offices: [
-        {office_id, office_name_in_file, lines: [{classification, code, name,
-         prev_year_actual, current_annual, proposed_amount}, ...]}, ...]}
-    Only offices the admin actually confirmed (with a real office_id) should
+        {office_id, office_name_in_file, lines: [...]}, ...]}
+    office_id can also be the literal string "__create__" -- in that case a
+    new Office is created using office_name_in_file (and office_code /
+    office_sector, if given) before the proposal is written. Only offices
+    the admin actually confirmed (a real office_id, or "__create__") should
     be included -- the preview step is what lets the admin leave out/fix
     anything that didn't match."""
     year = payload.get("year")
@@ -1709,12 +1711,33 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail="No offices to import -- nothing was confirmed.")
 
     offices_updated = 0
+    offices_created = 0
     lines_written = 0
     accounts_created = 0
 
     for office_entry in offices_in:
         office_id = office_entry.get("office_id")
-        office = db.query(models.Office).get(office_id) if office_id else None
+        office = None
+
+        if office_id == "__create__":
+            new_name = (office_entry.get("office_name_in_file") or "").strip()
+            if not new_name:
+                continue
+            # guard against a race / duplicate: another row (or a previous
+            # partial run) may have already created this exact name
+            office = db.query(models.Office).filter(models.Office.name.ilike(new_name)).first()
+            if not office:
+                office = models.Office(
+                    name=new_name,
+                    code=office_entry.get("office_code") or None,
+                    sector=office_entry.get("office_sector") or None,
+                )
+                db.add(office)
+                db.flush()
+                offices_created += 1
+        elif office_id:
+            office = db.query(models.Office).get(office_id)
+
         if not office:
             continue  # admin chose to skip/couldn't match this one -- leave it alone
 
@@ -1768,6 +1791,7 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
 
     return {
         "offices_updated": offices_updated,
+        "offices_created": offices_created,
         "lines_written": lines_written,
         "accounts_created": accounts_created,
     }

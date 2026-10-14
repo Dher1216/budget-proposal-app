@@ -1624,7 +1624,7 @@ function renderImportPreview() {
   document.getElementById("imp_summaryLine").innerHTML =
     `${p.offices.length} office sheet(s) found for <strong>${p.year} ${p.budget_type}</strong> — ` +
     `grand total proposed: <strong>${money(p.grand_total_proposed)}</strong>. ` +
-    (unmatchedCount ? `<span style="color:var(--danger);">${unmatchedCount} sheet(s) need you to pick an office below.</span> ` : "") +
+    (unmatchedCount ? `<span style="color:var(--danger);">${unmatchedCount} sheet(s) didn't match an existing office — set to create a new office for them below, or pick an existing one / skip.</span> ` : "") +
     (mismatchCount ? `<span style="color:var(--danger);">${mismatchCount} sheet(s) have a total that doesn't match the file's own grand-total line — double check those.</span>` : "");
 
   const skippedEl = document.getElementById("imp_skippedNote");
@@ -1650,6 +1650,7 @@ function renderImportPreview() {
         <td>
           <select data-idx="${idx}" class="imp-office-select">
             <option value="">-- skip this sheet --</option>
+            <option value="__create__">+ Create new office "${o.office_name_in_file}"</option>
             ${officeOptions}
           </select>
         </td>
@@ -1660,11 +1661,13 @@ function renderImportPreview() {
       </tr>`;
   }).join("");
 
-  // pre-select each row's suggested office match
+  // pre-select each row's suggested office match; if nothing matched,
+  // default to "create a new office" rather than leaving it skipped --
+  // admin can still change it to an existing office or "skip" instead.
   document.querySelectorAll(".imp-office-select").forEach(sel => {
     const idx = Number(sel.dataset.idx);
     const suggested = p.offices[idx].suggested_office_id;
-    if (suggested != null) sel.value = String(suggested);
+    sel.value = suggested != null ? String(suggested) : "__create__";
   });
 }
 
@@ -1674,12 +1677,23 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
 
   const rows = Array.from(document.querySelectorAll(".imp-office-select"));
   const offices = [];
+  let newOfficeCount = 0;
   rows.forEach(sel => {
     const idx = Number(sel.dataset.idx);
-    const officeId = sel.value ? Number(sel.value) : null;
-    if (!officeId) return;  // admin chose to skip this sheet
+    if (!sel.value) return;  // admin chose to skip this sheet
     const o = IMPORT_PREVIEW.offices[idx];
-    offices.push({ office_id: officeId, office_name_in_file: o.office_name_in_file, lines: o.lines });
+    if (sel.value === "__create__") {
+      newOfficeCount++;
+      offices.push({
+        office_id: "__create__",
+        office_name_in_file: o.office_name_in_file,
+        office_code: o.office_code,
+        office_sector: o.office_sector,
+        lines: o.lines,
+      });
+    } else {
+      offices.push({ office_id: Number(sel.value), office_name_in_file: o.office_name_in_file, lines: o.lines });
+    }
   });
 
   if (!offices.length) {
@@ -1687,7 +1701,8 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
     statusEl.className = "status-msg error";
     return;
   }
-  if (!confirm(`Import ${offices.length} office(s) into the ${IMPORT_PREVIEW.year} ${IMPORT_PREVIEW.budget_type} budget? This writes the Previous Year Actual, Current Annual, and Proposed Amount for every matched line. Existing values for those fields will be overwritten; admin fields (Adjusted Proposal, Approved, remarks) are left untouched.`)) {
+  const createNote = newOfficeCount ? ` This will also create ${newOfficeCount} new office record(s) (name only — you'll still need to add a user account for each under the Users tab so that office can log in).` : "";
+  if (!confirm(`Import ${offices.length} office(s) into the ${IMPORT_PREVIEW.year} ${IMPORT_PREVIEW.budget_type} budget?${createNote} This writes the Previous Year Actual, Current Annual, and Proposed Amount for every matched line. Existing values for those fields will be overwritten; admin fields (Adjusted Proposal, Approved, remarks) are left untouched.`)) {
     return;
   }
 
@@ -1705,7 +1720,8 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
       source_label: document.getElementById("imp_file").files[0]?.name || "budget import",
       offices,
     });
-    statusEl.textContent = `Done — updated ${result.offices_updated} office(s), wrote ${result.lines_written} line amount(s), and added ${result.accounts_created} new account(s) to the chart of accounts.`;
+    const createdNote = result.offices_created ? ` (${result.offices_created} of those are newly-created offices — add a user account for each under the Users tab.)` : "";
+    statusEl.textContent = `Done — updated ${result.offices_updated} office(s), wrote ${result.lines_written} line amount(s), and added ${result.accounts_created} new account(s) to the chart of accounts.${createdNote}`;
     statusEl.className = "status-msg ok";
   } catch (err) {
     statusEl.textContent = err.message;
