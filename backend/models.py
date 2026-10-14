@@ -17,6 +17,7 @@ class Classification(str, enum.Enum):
     MOOE = "MOOE"     # Maintenance and Other Operating Expenditures
     CO = "CO"        # Capital Outlay
     FE = "FE"        # Financial Expenses
+    SPA = "SPA"       # Special Purpose Appropriations
 
 
 class BudgetType(str, enum.Enum):

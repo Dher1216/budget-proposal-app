@@ -50,7 +50,7 @@ class PasswordResetRequest(BaseModel):
 
 
 class AccountCreate(BaseModel):
-    classification: str           # "PS" | "MOOE" | "CO" | "FE"
+    classification: str           # "PS" | "MOOE" | "CO" | "FE" | "SPA"
     code: str
     name: str
 

@@ -45,6 +45,23 @@ def ensure_new_columns():
                 conn.execute(text(f"ALTER TABLE proposals ADD COLUMN locked_by_admin {boolean_type} NOT NULL {default_clause}"))
                 print("Migration: added proposals.locked_by_admin")
 
+
+def ensure_new_enum_values():
+    """Account.classification now also allows "SPA" (Special Purpose
+    Appropriations) alongside the original PS/MOOE/CO/FE. On Postgres this
+    column is backed by a real native ENUM TYPE, so adding "SPA" to the
+    Python model isn't enough by itself on an existing database -- every
+    insert/update using "SPA" would fail until the database's own enum
+    type is told about the new value too. SQLite has no such type (this
+    column is just a VARCHAR there), so there's nothing to do locally.
+    Safe to re-run -- ADD VALUE IF NOT EXISTS is a no-op once it's there."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.connect() as conn:
+        conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+        conn.execute(text("ALTER TYPE classification ADD VALUE IF NOT EXISTS 'SPA'"))
+    print("Migration: added 'SPA' to the classification enum type")
+
 # classification, code, name
 ACCOUNTS = [
     # -------- Personal Services --------
@@ -180,6 +197,7 @@ ACCOUNTS = [
 def run():
     ensure_new_columns()
     Base.metadata.create_all(bind=engine)
+    ensure_new_enum_values()
     db = SessionLocal()
     try:
         # Accounts

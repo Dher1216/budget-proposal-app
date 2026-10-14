@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 import models
 import schemas
@@ -421,8 +421,8 @@ def find_duplicate_account_name(db: Session, name: str, exclude_id: Optional[int
 @app.post("/api/accounts", response_model=schemas.AccountOut)
 def create_account(payload: schemas.AccountCreate, db: Session = Depends(get_db),
                     admin: models.User = Depends(require_admin)):
-    if payload.classification not in ("PS", "MOOE", "CO", "FE"):
-        raise HTTPException(status_code=400, detail="classification must be one of PS, MOOE, CO, FE")
+    if payload.classification not in ("PS", "MOOE", "CO", "FE", "SPA"):
+        raise HTTPException(status_code=400, detail="classification must be one of PS, MOOE, CO, FE, SPA")
     name = payload.name.strip()
     dupe = find_duplicate_account_name(db, name)
     if dupe:
@@ -457,8 +457,8 @@ def update_account(account_id: int, payload: schemas.AccountUpdate, db: Session 
         raise HTTPException(status_code=404, detail="Account not found")
 
     if payload.classification is not None:
-        if payload.classification not in ("PS", "MOOE", "CO", "FE"):
-            raise HTTPException(status_code=400, detail="classification must be one of PS, MOOE, CO, FE")
+        if payload.classification not in ("PS", "MOOE", "CO", "FE", "SPA"):
+            raise HTTPException(status_code=400, detail="classification must be one of PS, MOOE, CO, FE, SPA")
         acc.classification = payload.classification
     if payload.code is not None:
         acc.code = payload.code.strip()
@@ -1803,18 +1803,27 @@ def cleanup_attachments(payload: schemas.CleanupAttachmentsRequest, db: Session 
                          admin: models.User = Depends(require_admin)):
     """Deletes attachment FILES for a given year to free up storage, while
     leaving all proposal data (amounts, remarks, everything else) untouched.
-    Strongly recommend downloading a backup first -- this cannot be undone."""
-    attachments = (
-        db.query(models.ProposalLineAttachment)
-        .join(models.ProposalLine)
-        .join(models.Proposal)
+    Strongly recommend downloading a backup first -- this cannot be undone.
+
+    Counts/sums with SQL aggregates and deletes with one bulk statement,
+    instead of loading every attachment's full file bytes into memory and
+    deleting them one row at a time -- same fix as purge-year, for the
+    same reason (avoids timing out against the hosted database when
+    there are a lot of attachments for the year)."""
+    id_q = (
+        db.query(models.ProposalLineAttachment.id)
+        .join(models.ProposalLine, models.ProposalLineAttachment.proposal_line_id == models.ProposalLine.id)
+        .join(models.Proposal, models.ProposalLine.proposal_id == models.Proposal.id)
         .filter(models.Proposal.year == payload.year)
-        .all()
     )
-    count = len(attachments)
-    bytes_freed = sum(a.file_size or len(a.file_data or b"") for a in attachments)
-    for a in attachments:
-        db.delete(a)
+    count = id_q.count()
+    bytes_freed = db.query(func.coalesce(func.sum(models.ProposalLineAttachment.file_size), 0)).filter(
+        models.ProposalLineAttachment.id.in_(id_q)
+    ).scalar() or 0
+
+    db.query(models.ProposalLineAttachment).filter(
+        models.ProposalLineAttachment.id.in_(id_q)
+    ).delete(synchronize_session=False)
     db.commit()
     return {"deleted_count": count, "bytes_freed": bytes_freed}
 
@@ -1825,17 +1834,45 @@ def purge_year(payload: schemas.PurgeYearRequest, db: Session = Depends(get_db),
     """Permanently deletes ALL proposals (and their lines, attachments, and
     audit history) for a given year, across every office and every budget
     type/supplemental. Requires typing the year twice as a safety check.
-    Download a backup first -- there is no undo."""
+    Download a backup first -- there is no undo.
+
+    Deletes with bulk SQL statements (one DELETE per table) instead of the
+    ORM's one-row-at-a-time cascade. A full year across every office is
+    thousands of proposal lines, and looping db.delete() per row -- plus
+    the per-line attachment count this used to compute first -- meant
+    thousands of individual round trips to the database in a single
+    request, which was slow enough to time out against the hosted
+    database instead of actually completing."""
     if payload.year != payload.confirm_year:
         raise HTTPException(status_code=400, detail="Year confirmation did not match. Nothing was deleted.")
 
-    proposals = db.query(models.Proposal).filter(models.Proposal.year == payload.year).all()
-    proposal_count = len(proposals)
-    line_count = sum(len(p.lines) for p in proposals)
-    attachment_count = sum(len(l.attachments) for p in proposals for l in p.lines)
+    proposal_q = db.query(models.Proposal.id).filter(models.Proposal.year == payload.year)
+    proposal_count = proposal_q.count()
+    if proposal_count == 0:
+        return {"deleted_proposals": 0, "deleted_lines": 0, "deleted_attachments": 0}
 
-    for p in proposals:
-        db.delete(p)  # cascades to lines, attachments, and audit log entries
+    line_q = db.query(models.ProposalLine.id).filter(models.ProposalLine.proposal_id.in_(proposal_q))
+    line_count = line_q.count()
+    attachment_count = db.query(models.ProposalLineAttachment).filter(
+        models.ProposalLineAttachment.proposal_line_id.in_(line_q)
+    ).count()
+
+    # Children first, in dependency order, then the proposals themselves.
+    db.query(models.ProposalLineAttachment).filter(
+        models.ProposalLineAttachment.proposal_line_id.in_(line_q)
+    ).delete(synchronize_session=False)
+    db.query(models.ProposalLineCurrentSupplemental).filter(
+        models.ProposalLineCurrentSupplemental.proposal_line_id.in_(line_q)
+    ).delete(synchronize_session=False)
+    db.query(models.ProposalLine).filter(
+        models.ProposalLine.proposal_id.in_(proposal_q)
+    ).delete(synchronize_session=False)
+    db.query(models.AuditLog).filter(
+        models.AuditLog.proposal_id.in_(proposal_q)
+    ).delete(synchronize_session=False)
+    db.query(models.Proposal).filter(
+        models.Proposal.id.in_(proposal_q)
+    ).delete(synchronize_session=False)
     db.commit()
 
     return {
@@ -1878,9 +1915,15 @@ async def budget_import_preview(
         )
 
     existing_offices = [(o.id, o.name) for o in db.query(models.Office).all()]
-    existing_accounts = {
-        a.name.strip().lower(): a.id for a in db.query(models.Account).all()
-    }
+    # Match on the same loose normalization used for duplicate-account
+    # detection (handles re-typed spelling/punctuation variants, e.g. the
+    # file saying "Travelling Expenses-Local" when the system already has
+    # "Traveling Expenses-Local") -- not just an exact, character-for-
+    # character name match. Otherwise re-importing after cleaning up a
+    # duplicate just recreates it under the file's spelling.
+    existing_accounts = {}
+    for a in db.query(models.Account).all():
+        existing_accounts.setdefault(_normalize_account_name(a.name), a.id)
 
     grand_total = 0.0
     for office in parsed["offices"]:
@@ -1889,7 +1932,7 @@ async def budget_import_preview(
         )
         new_account_count = 0
         for line in office["lines"]:
-            match_id = existing_accounts.get(line["name"].strip().lower())
+            match_id = existing_accounts.get(_normalize_account_name(line["name"]))
             line["matched_account_id"] = match_id
             if match_id is None:
                 new_account_count += 1
@@ -1934,6 +1977,16 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
     lines_written = 0
     accounts_created = 0
 
+    # Same loose-normalization matching as the preview step (and kept in
+    # sync as accounts are created during this request) -- otherwise a
+    # file spelling/punctuation variant of an account that already exists
+    # (e.g. the admin just merged "Travelling Expenses-Local" into
+    # "Traveling Expenses-Local", and the file says "Travelling") would
+    # fail an exact-name lookup and get recreated as a fresh duplicate.
+    accounts_by_norm = {}
+    for a in db.query(models.Account).all():
+        accounts_by_norm.setdefault(_normalize_account_name(a.name), a)
+
     for office_entry in offices_in:
         office_id = office_entry.get("office_id")
         office = None
@@ -1970,14 +2023,16 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
             classification = line.get("classification")
             code = str(line.get("code") or "").strip()
 
-            account = find_duplicate_account_name(db, name)
+            norm_name = _normalize_account_name(name)
+            account = find_duplicate_account_name(db, name) or accounts_by_norm.get(norm_name)
             if not account:
-                if classification not in ("PS", "MOOE", "CO", "FE"):
+                if classification not in ("PS", "MOOE", "CO", "FE", "SPA"):
                     continue  # can't create an account without a known classification
                 account = models.Account(classification=classification, code=code or "", name=name)
                 db.add(account)
                 db.flush()
                 accounts_created += 1
+                accounts_by_norm[norm_name] = account
                 # keep every other proposal's line set consistent, same as
                 # the regular "create account" endpoint does
                 for p in db.query(models.Proposal).filter(models.Proposal.id != proposal.id).all():

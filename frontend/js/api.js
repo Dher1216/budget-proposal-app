@@ -368,5 +368,6 @@ const CLASSIFICATION_LABELS = {
   MOOE: "Maintenance and Other Operating Expenditures",
   FE: "Financial Expenses",
   CO: "Capital Outlay",
+  SPA: "Special Purpose Appropriations",
 };
-const CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO"];
+const CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA"];

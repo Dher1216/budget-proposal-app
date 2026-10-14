@@ -726,6 +726,7 @@ function renderAccountsTable() {
             <option value="MOOE" ${a.classification === "MOOE" ? "selected" : ""}>MOOE</option>
             <option value="CO" ${a.classification === "CO" ? "selected" : ""}>Capital Outlay</option>
             <option value="FE" ${a.classification === "FE" ? "selected" : ""}>Financial Expenses</option>
+            <option value="SPA" ${a.classification === "SPA" ? "selected" : ""}>Special Purpose Appropriations</option>
           </select>
         </td>
         <td><input type="text" class="edit-code" value="${a.code}"></td>

@@ -49,6 +49,12 @@ def _classify(label: str) -> Optional[str]:
         return "CO"
     if "FINANCIAL EXPENSE" in u:
         return "FE"
+    if "SPECIAL PURPOSE" in u:
+        # "Special Purpose Appropriations" (e.g. "3.0 SPECIAL PURPOSE
+        # APPROPRIATIONS") is its own classification, same as the file --
+        # not folded into whichever section happened to come right before
+        # it (previously Capital Outlay, since SPA usually follows it).
+        return "SPA"
     return None
 
 
