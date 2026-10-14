@@ -509,11 +509,19 @@ def delete_account(account_id: int, db: Session = Depends(get_db), admin: models
 def _normalize_account_name(name: str) -> str:
     """Loose normalization for spotting likely-duplicate account names --
     lowercase, collapse whitespace, drop trailing punctuation and a few
-    characters that commonly differ between re-typed versions of the same
-    name (periods, extra spaces around '&', double spaces, etc)."""
+    things that commonly differ between re-typed versions of the same name:
+    periods, commas, extra spaces around '&', double spaces, "and" vs
+    "&" (e.g. "Agricultural & Forestry Equipment" vs "Agricultural and
+    Forestry Equipment" -- same account, different conjunction), and the
+    American/British "traveling"/"travelling" (single vs double "l")
+    spelling variants, e.g. "Traveling Expenses-Local" vs "Travelling
+    Expenses-Local"."""
     n = re.sub(r"\s+", " ", name.strip().lower())
     n = n.replace(".", "").replace(",", "")
+    n = re.sub(r"\band\b", "&", n)
     n = re.sub(r"\s*&\s*", " & ", n)
+    n = re.sub(r"\btravell(ing|ed|er|ers)\b", r"travel\1", n)
+    n = re.sub(r"\s+", " ", n)
     return n.strip()
 
 
@@ -578,6 +586,34 @@ def duplicate_account_candidates(db: Session = Depends(get_db), admin: models.Us
             "accounts": [
                 {"id": a.id, "name": a.name, "code": a.code, "classification": a.classification.value}
                 for a in sorted(cluster, key=lambda x: x.id)
+            ],
+        })
+        grouped_ids.update(a.id for a in cluster)
+
+    # same-code pass: two entries under the same classification with the
+    # EXACT same account code are very likely one account typed two ways
+    # (including abbreviations/shorthand that read nothing alike as text,
+    # e.g. "ICT Equipment" vs "Information & Communication Technology
+    # Equipment"), even though a handful of codes are legitimately shared
+    # by different sibling line items (see seed_data.py / README) -- so
+    # this tier is always shown for a manual look, never auto-assumed safe.
+    by_code = {}
+    for a in accounts:
+        if a.id in grouped_ids:
+            continue
+        by_code.setdefault((a.classification, (a.code or "").strip()), []).append(a)
+
+    for (cls, code), accs in by_code.items():
+        if not code or len(accs) < 2:
+            continue
+        distinct_names = {_normalize_account_name(a.name) for a in accs}
+        if len(distinct_names) < 2:
+            continue  # exact same name under same code -- not a naming mismatch
+        groups.append({
+            "confidence": "same_code",
+            "accounts": [
+                {"id": a.id, "name": a.name, "code": a.code, "classification": a.classification.value}
+                for a in sorted(accs, key=lambda x: x.id)
             ],
         })
 

@@ -838,9 +838,11 @@ document.getElementById("a_findDupesBtn").addEventListener("click", async () => 
 function renderDupeGroups(groups) {
   const groupsEl = document.getElementById("a_dupesGroups");
   groupsEl.innerHTML = groups.map((g, gIdx) => {
-    const confidenceLabel = g.confidence === "normalized_match"
-      ? `<span class="badge" style="background:#d4edda;color:#155724;">likely the same account</span>`
-      : `<span class="badge" style="background:#FBE4E4;color:#8A2525;">similar — check carefully, could be two different accounts</span>`;
+    const confidenceLabel = {
+      normalized_match: `<span class="badge" style="background:#d4edda;color:#155724;">likely the same account</span>`,
+      same_code: `<span class="badge" style="background:#F1E9FB;color:#5B3A94;">same account code, different wording — could be an abbreviation, or could be a legitimate sibling (e.g. a salary + its step-increment variant). Check before merging.</span>`,
+      similar: `<span class="badge" style="background:#FBE4E4;color:#8A2525;">similar — check carefully, could be two different accounts</span>`,
+    }[g.confidence] || "";
     const rows = g.accounts.map((a, aIdx) => `
       <label style="display:flex; align-items:center; gap:8px; padding:4px 0;">
         <input type="radio" name="dupe_keep_${gIdx}" value="${a.id}" ${aIdx === 0 ? "checked" : ""}>
