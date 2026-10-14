@@ -1376,27 +1376,39 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
     else:
         prop_q = prop_q.filter(models.Proposal.supplemental_number.is_(None))
 
-    total_proposed = 0.0
-    total_adjusted = 0.0
-    total_approved = 0.0
+    total_proposed = total_adjusted = total_approved = 0.0
+    # Lines under accounts classified "SPA" (Special Purpose Appropriations)
+    # are tracked separately and counted as part of the SPA total below,
+    # not in the regular office-expenditure totals -- so they show up in
+    # the SPA figure without being deducted from the balance twice.
+    spa_acct_proposed = spa_acct_adjusted = spa_acct_approved = 0.0
     for p in prop_q.all():
         for l in p.lines:
             proposed = l.proposed_amount or 0
-            total_proposed += proposed
             # Adjusted falls back to the proposed amount wherever no
             # adjustment has been made yet, so this reflects "what the
             # balance would look like using admin's adjustments so far."
-            total_adjusted += l.adjusted_proposal if l.adjusted_proposal is not None else proposed
+            adjusted = l.adjusted_proposal if l.adjusted_proposal is not None else proposed
             # Approved only counts once an admin has actually approved that
             # line -- this reflects the real, locked-in commitment, which
             # matters once a prorated/adjusted amount has been approved.
-            total_approved += l.approved_amount or 0
+            approved = l.approved_amount or 0
+            if account_classification_str(l.account) == "SPA":
+                spa_acct_proposed += proposed
+                spa_acct_adjusted += adjusted
+                spa_acct_approved += approved
+            else:
+                total_proposed += proposed
+                total_adjusted += adjusted
+                total_approved += approved
 
     # Special Purpose Appropriations (mandatory deductions like the 20%
     # Development Fund and 5% LDRRMF) are committed against available funds
     # BEFORE offices are allocated anything, so they reduce the balance the
-    # same way office expenditures do.
-    total_spa = _total_spa(db, year, budget_type, supplemental_number)
+    # same way office expenditures do. Office lines under SPA-classified
+    # accounts are part of the same SPA total.
+    mandatory_spa = _total_spa(db, year, budget_type, supplemental_number)
+    total_spa = mandatory_spa + spa_acct_proposed
 
     return schemas.BudgetSummaryOut(
         year=year, budget_type=budget_type,
@@ -1406,9 +1418,9 @@ def budget_summary(year: int, budget_type: str, supplemental_number: Optional[in
         total_proposed=total_proposed,
         total_adjusted=total_adjusted,
         total_approved=total_approved,
-        balance_vs_proposed=available_budget - total_spa - total_proposed,
-        balance_vs_adjusted=available_budget - total_spa - total_adjusted,
-        balance_vs_approved=available_budget - total_spa - total_approved,
+        balance_vs_proposed=available_budget - mandatory_spa - spa_acct_proposed - total_proposed,
+        balance_vs_adjusted=available_budget - mandatory_spa - spa_acct_adjusted - total_adjusted,
+        balance_vs_approved=available_budget - mandatory_spa - spa_acct_approved - total_approved,
     )
 
 

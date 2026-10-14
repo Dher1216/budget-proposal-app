@@ -497,6 +497,8 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
 
     expenditure_class_totals = {}
     for classification in CLASSIFICATION_ORDER:
+        if classification == "SPA":
+            continue  # reported under "D. Special Purpose Appropriations" below
         rows = rows_by_class.get(classification, [])
         if not rows:
             expenditure_class_totals[classification] = 0.0
@@ -519,6 +521,10 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
     for spa in spa_rows:
         r = data_row(r, spa["name"], "", "", "", spa["amount"])
         spa_total += spa["amount"]
+    # office lines under SPA-classified accounts belong in this section too
+    for row_data in sorted(rows_by_class.get("SPA", []), key=lambda x: (x["account_code"], x["account_name"])):
+        r = data_row(r, row_data["account_name"], row_data["account_code"], "", "", row_data["total_proposed"])
+        spa_total += row_data["total_proposed"]
     r = data_row(r, "Total Special Purpose Appropriations", "", "", "", spa_total, bold=True, fill=SECTION_FILL)
 
     total_expenditures = sum(expenditure_class_totals.values()) + spa_total

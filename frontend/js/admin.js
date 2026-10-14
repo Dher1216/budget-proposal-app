@@ -1438,7 +1438,7 @@ document.getElementById("s_load").addEventListener("click", async () => {
     let spaPath = `/api/spa?year=${year}&budget_type=${budget_type}`;
     if (budget_type === "supplemental") spaPath += `&supplemental_number=${supp}`;
     const { data: spaRows } = await apiGet(spaPath, { cacheable: true });
-    renderSummarySpaTable(spaRows);
+    renderSummarySpaTable(spaRows, data.rows.filter(r => r.classification === "SPA" && r.total_proposed));
   } catch (err) {
     alert(err.message);
   }
@@ -1465,17 +1465,22 @@ function renderSummaryFundTable(sources) {
   table.innerHTML = "<thead><tr><th>Category</th><th>Particulars</th><th class='num'>Amount</th></tr></thead><tbody>" + rows + "</tbody>";
 }
 
-function renderSummarySpaTable(rows) {
+function renderSummarySpaTable(rows, accountRows = []) {
   const table = document.getElementById("s_spaTable");
-  if (!rows.length) {
+  if (!rows.length && !accountRows.length) {
     table.innerHTML = "<thead><tr><th>Deduction</th><th class='num'>Amount</th></tr></thead><tbody><tr><td colspan='2'>No Special Purpose Appropriations recorded for this budget cycle.</td></tr></tbody>";
     return;
   }
   let total = 0;
-  const trs = rows.map(r => {
+  let trs = rows.map(r => {
     total += r.amount;
     return `<tr><td>${r.name}${r.auto_computed ? ' <span class="hint" style="margin:0;">(auto-computed)</span>' : ""}</td><td class="num">${money(r.amount)}</td></tr>`;
   }).join("");
+  // office lines under accounts classified as SPA count toward the same total
+  accountRows.forEach(r => {
+    total += r.total_proposed;
+    trs += `<tr><td>${r.account_name} <span class="hint" style="margin:0;">(${r.account_code})</span></td><td class="num">${money(r.total_proposed)}</td></tr>`;
+  });
   table.innerHTML = `<thead><tr><th>Deduction</th><th class="num">Amount</th></tr></thead>
     <tbody>${trs}<tr class="subtotal-row"><td>Total Special Purpose Appropriations</td><td class="num">${money(total)}</td></tr></tbody>`;
 }
