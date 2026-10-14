@@ -1269,13 +1269,18 @@ def _spa_rows_with_live_amounts(db: Session, year: int, budget_type: str, supple
     out = []
     for r in sorted(rows, key=lambda r: r.sort_order):
         amount = r.amount
+        computed = None
         if r.auto_computed == "dev_fund_20pct":
-            amount = _compute_dev_fund_20pct(by_category)
+            computed = _compute_dev_fund_20pct(by_category)
         elif r.auto_computed == "ldrrmf_5pct":
-            amount = _compute_ldrrmf_5pct(by_category)
+            computed = _compute_ldrrmf_5pct(by_category)
+        overridden = computed is not None and r.amount_override is not None
+        if computed is not None:
+            amount = r.amount_override if overridden else computed
         out.append(schemas.SpaOut(
             id=r.id, year=r.year, budget_type=r.budget_type, supplemental_number=r.supplemental_number,
             name=r.name, amount=amount, auto_computed=r.auto_computed,
+            computed_amount=computed, is_overridden=overridden,
         ))
     return out
 
@@ -1321,24 +1326,20 @@ def update_spa(spa_id: int, payload: schemas.SpaUpdate, db: Session = Depends(ge
     row = db.query(models.SpecialPurposeAppropriation).get(spa_id)
     if not row:
         raise HTTPException(status_code=404, detail="Special Purpose Appropriation not found")
-    if row.auto_computed and payload.amount is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="This amount is computed automatically from fund sources and can't be edited directly."
-        )
     if payload.name is not None:
         row.name = payload.name.strip()
-    if payload.amount is not None:
+    if row.auto_computed:
+        # The automatic 20% / 5% figures can be overridden by hand (e.g. when
+        # the automatic value is rounded and the admin wants an exact amount).
+        if payload.reset_to_auto:
+            row.amount_override = None
+        elif payload.amount is not None:
+            row.amount_override = payload.amount
+    elif payload.amount is not None:
         row.amount = payload.amount
     db.commit()
-    db.refresh(row)
-    amount = row.amount
-    if row.auto_computed:
-        by_category = _fund_source_totals_by_category(db, row.year, row.budget_type, row.supplemental_number)
-        amount = _compute_dev_fund_20pct(by_category) if row.auto_computed == "dev_fund_20pct" else _compute_ldrrmf_5pct(by_category)
-    return schemas.SpaOut(id=row.id, year=row.year, budget_type=row.budget_type,
-                           supplemental_number=row.supplemental_number, name=row.name,
-                           amount=amount, auto_computed=row.auto_computed)
+    live = _spa_rows_with_live_amounts(db, row.year, row.budget_type.value if hasattr(row.budget_type, "value") else row.budget_type, row.supplemental_number)
+    return next(r for r in live if r.id == row.id)
 
 
 @app.delete("/api/spa/{spa_id}")

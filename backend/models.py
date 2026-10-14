@@ -65,6 +65,10 @@ class SpecialPurposeAppropriation(Base):
     name = Column(String, nullable=False)
     amount = Column(Float, nullable=False, default=0)      # stored value; ignored/recomputed for auto_computed rows
     auto_computed = Column(String, nullable=True)  # None | "dev_fund_20pct" | "ldrrmf_5pct"
+    # Admin's manual figure for an auto-computed row (e.g. to avoid the
+    # automatic value's rounding). When set it replaces the computed amount;
+    # NULL means "use the automatic computation".
+    amount_override = Column(Float, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
 
 

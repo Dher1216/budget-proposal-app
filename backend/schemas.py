@@ -228,6 +228,7 @@ class SpaCreate(BaseModel):
 class SpaUpdate(BaseModel):
     name: Optional[str] = None
     amount: Optional[float] = None
+    reset_to_auto: bool = False   # clear a manual override on an auto-computed row
 
 
 class SpaOut(BaseModel):
@@ -238,6 +239,8 @@ class SpaOut(BaseModel):
     name: str
     amount: float
     auto_computed: Optional[str] = None
+    computed_amount: Optional[float] = None   # the automatic value, for auto-computed rows
+    is_overridden: bool = False               # True when admin has typed their own figure
     class Config:
         from_attributes = True
 

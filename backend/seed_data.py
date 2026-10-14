@@ -45,6 +45,13 @@ def ensure_new_columns():
                 conn.execute(text(f"ALTER TABLE proposals ADD COLUMN locked_by_admin {boolean_type} NOT NULL {default_clause}"))
                 print("Migration: added proposals.locked_by_admin")
 
+        if "special_purpose_appropriations" in existing_tables:
+            existing_cols = {c["name"] for c in inspector.get_columns("special_purpose_appropriations")}
+            if "amount_override" not in existing_cols:
+                float_type = "DOUBLE PRECISION" if is_postgres else "FLOAT"
+                conn.execute(text(f"ALTER TABLE special_purpose_appropriations ADD COLUMN amount_override {float_type}"))
+                print("Migration: added special_purpose_appropriations.amount_override")
+
 
 def ensure_new_enum_values():
     """Account.classification now also allows "SPA" (Special Purpose

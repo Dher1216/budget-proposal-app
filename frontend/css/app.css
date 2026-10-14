@@ -333,6 +333,10 @@ table.data-table tbody tr:not(.section-row):not(.subtotal-row):hover td{
 .status-msg{ font-size:13.5px; margin-top:10px; min-height:16px; }
 .status-msg.ok{ color:var(--accent); }
 .status-msg.error{ color:var(--danger); }
+.status-msg.loading{ color:var(--text-muted, #5b5470); font-weight:600; }
+.spinner{ display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:-2px; animation:spin .7s linear infinite; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.office-search{ display:block; width:100%; box-sizing:border-box; }
 
 .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media (max-width:800px){ .two-col{ grid-template-columns:1fr; } }

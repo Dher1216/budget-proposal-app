@@ -21,11 +21,51 @@ async function loadOfficesIntoSelects() {
     selects.forEach(sel => {
       sel.innerHTML = data.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
     });
+    // re-apply anything already typed in a search box after the list reloads
+    document.querySelectorAll(".office-search").forEach(box => box.dispatchEvent(new Event("input")));
     renderOfficeList();
   } catch (err) {
     console.error(err);
   }
 }
+
+// Adds a "type to search" box above an office dropdown, so an office can be
+// found by typing part of its name (any words, any order) instead of only
+// scrolling the list. Filters the dropdown's options in place -- the rest of
+// the page keeps reading the dropdown's value exactly as before.
+function makeOfficeSelectSearchable(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel || sel.dataset.searchable) return;
+  sel.dataset.searchable = "1";
+  const box = document.createElement("input");
+  box.type = "search";
+  box.className = "office-search";
+  box.placeholder = "Search office name…";
+  box.autocomplete = "off";
+  box.style.marginBottom = "6px";
+  sel.parentNode.insertBefore(box, sel);
+
+  box.addEventListener("input", () => {
+    const tokens = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const prev = sel.value;
+    const matches = OFFICES.filter(o => {
+      const hay = `${o.name} ${o.code || ""} ${o.sector || ""}`.toLowerCase();
+      return tokens.every(t => hay.includes(t));
+    });
+    if (!matches.length) {
+      sel.innerHTML = `<option value="" disabled selected>No office matches "${box.value.replace(/"/g, "")}"</option>`;
+      return;
+    }
+    sel.innerHTML = matches.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+    if (matches.some(o => String(o.id) === prev)) sel.value = prev;
+  });
+  // Enter jumps straight to the first match and leaves the box
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); sel.focus(); }
+  });
+}
+makeOfficeSelectSearchable("p_office");
+makeOfficeSelectSearchable("r_office");
 
 function officeLogoUrl(officeId) {
   return `/api/offices/${officeId}/logo?t=${Date.now()}`;
@@ -1147,15 +1187,12 @@ function recomputeLiveSpaPreview() {
   });
   const ldrrmf = Math.round(ldrrmfBase * 0.05 * 100) / 100;
 
-  const rows = spaTable.querySelectorAll("tbody tr");
-  rows.forEach(row => {
-    const label = row.children[0] && row.children[0].textContent;
-    if (!label) return;
-    if (label.includes("20% Development Fund")) {
-      row.children[1].innerHTML = `${money(devFund)} <span class="hint" style="margin:0;">(live preview — unsaved)</span>`;
-    } else if (label.includes("5% LDRRMF")) {
-      row.children[1].innerHTML = `${money(ldrrmf)} <span class="hint" style="margin:0;">(live preview — unsaved)</span>`;
-    }
+  // Only the small "automatic value" hint is updated -- the amount box
+  // itself is left alone so a manually typed figure is never overwritten.
+  const hints = { dev_fund_20pct: devFund, ldrrmf_5pct: ldrrmf };
+  spaTable.querySelectorAll(".spa-auto-hint").forEach(h => {
+    const v = hints[h.dataset.key];
+    if (v !== undefined) h.innerHTML = `Automatic value: ${money(v)} (live preview — unsaved)`;
   });
 }
 
@@ -1245,10 +1282,17 @@ function renderSpaTable(rows) {
   const trs = rows.map(r => {
     total += r.amount;
     const isAuto = !!r.auto_computed;
-    const amountCell = isAuto
-      ? `${money(r.amount)} <span class="hint" style="margin:0;">(auto-computed)</span>`
-      : `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" class="spa-amount-input" data-id="${r.id}" value="${money(r.amount)}">
-         <button class="btn secondary" style="padding:4px 10px;" onclick="saveSpaAmount(${r.id})">Save</button>`;
+    // Every row's amount is editable. For the automatic 20% / 5% rows the
+    // typed figure overrides the computed one (useful when the automatic
+    // value is rounded); "Reset to auto" goes back to the computation.
+    const autoHint = isAuto
+      ? `<div class="hint spa-auto-hint" data-key="${r.auto_computed}" style="margin:4px 0 0;">${r.is_overridden ? "Manually set" : "Auto-computed"} — automatic value: ${money(r.computed_amount)}</div>`
+      : "";
+    const resetBtn = isAuto && r.is_overridden
+      ? `<button class="btn secondary" style="padding:4px 10px;" onclick="resetSpaToAuto(${r.id})">Reset to auto</button>`
+      : "";
+    const amountCell = `<input type="text" inputmode="decimal" oninput="formatMoneyInput(this)" class="spa-amount-input" data-id="${r.id}" value="${money(r.amount)}">
+         <button class="btn secondary" style="padding:4px 10px;" onclick="saveSpaAmount(${r.id})">Save</button> ${resetBtn}${autoHint}`;
     const deleteBtn = isAuto ? "" : `<button class="btn danger" style="padding:4px 10px;" onclick="deleteSpa(${r.id})">Delete</button>`;
     return `<tr>
       <td>${r.name}</td>
@@ -1260,6 +1304,19 @@ function renderSpaTable(rows) {
     <tbody>${trs}
     <tr class="subtotal-row"><td>Total Special Purpose Appropriations</td><td class="num">${money(total)}</td><td></td></tr>
     </tbody>`;
+}
+
+async function resetSpaToAuto(id) {
+  const statusEl = document.getElementById("spa_status");
+  try {
+    await apiPut(`/api/spa/${id}`, { reset_to_auto: true });
+    statusEl.textContent = "Reset to the automatic amount.";
+    statusEl.className = "status-msg ok";
+    document.getElementById("f_load").click();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
 }
 
 async function loadSpa(year, budget_type, supp) {
@@ -1412,6 +1469,27 @@ function buildSummaryRows(rows) {
 let currentSummary = null;
 
 document.getElementById("s_load").addEventListener("click", async () => {
+  const loadBtn = document.getElementById("s_load");
+  const loadStatus = document.getElementById("s_loadStatus");
+  loadBtn.disabled = true;
+  const originalLabel = loadBtn.textContent;
+  loadBtn.textContent = "Loading…";
+  loadStatus.className = "status-msg loading";
+  loadStatus.innerHTML = '<span class="spinner"></span> Loading summary — this can take a few seconds for a full year…';
+  try {
+    await loadSummary();
+    loadStatus.className = "status-msg ok";
+    loadStatus.textContent = "Summary loaded " + new Date().toLocaleTimeString() + ".";
+  } catch (err) {
+    loadStatus.className = "status-msg error";
+    loadStatus.textContent = "Could not load the summary: " + err.message;
+  } finally {
+    loadBtn.disabled = false;
+    loadBtn.textContent = originalLabel;
+  }
+});
+
+async function loadSummary() {
   const year = document.getElementById("s_year").value;
   const budget_type = document.getElementById("s_type").value;
   const supp = document.getElementById("s_supplementalNumber").value;
@@ -1440,9 +1518,9 @@ document.getElementById("s_load").addEventListener("click", async () => {
     const { data: spaRows } = await apiGet(spaPath, { cacheable: true });
     renderSummarySpaTable(spaRows, data.rows.filter(r => r.classification === "SPA" && r.total_proposed));
   } catch (err) {
-    alert(err.message);
+    throw err;
   }
-});
+}
 
 function renderSummaryFundTable(sources) {
   const table = document.getElementById("s_fundTable");
