@@ -1565,3 +1565,152 @@ document.getElementById("bk_purgeBtn").addEventListener("click", async () => {
     statusEl.className = "status-msg error";
   }
 });
+
+// ------------------------------------------------------- budget data import --
+// Lets admin upload a per-office budget workbook (e.g. a new year's annual
+// budget data file) and import it straight into the system. Two steps:
+// Preview (parses the file, suggests office matches, writes nothing) then
+// Confirm & Import (writes exactly what was shown, using whatever office
+// matches the admin confirmed/corrected on screen).
+
+let IMPORT_PREVIEW = null;  // the full preview response, held in memory between preview and commit
+
+document.getElementById("imp_budgetType").addEventListener("change", (e) => {
+  document.getElementById("imp_supField").style.display = e.target.value === "supplemental" ? "" : "none";
+});
+
+document.getElementById("imp_previewBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("imp_previewStatus");
+  const fileInput = document.getElementById("imp_file");
+  const file = fileInput.files[0];
+  if (!file) {
+    statusEl.textContent = "Choose a .xlsx workbook first.";
+    statusEl.className = "status-msg error";
+    return;
+  }
+  const year = Number(document.getElementById("imp_year").value);
+  const budgetType = document.getElementById("imp_budgetType").value;
+  statusEl.textContent = "Reading workbook... this can take a moment for a large file.";
+  statusEl.className = "status-msg";
+  document.getElementById("imp_resultsPanel").style.display = "none";
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(
+      `/api/admin/budget-import/preview?year=${year}&budget_type=${budgetType}`,
+      { method: "POST", headers: { Authorization: "Bearer " + getToken() }, body: formData }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Could not read that workbook.");
+    }
+    IMPORT_PREVIEW = await res.json();
+    renderImportPreview();
+    statusEl.textContent = `Found ${IMPORT_PREVIEW.offices.length} office sheet(s). Review the matches below, then click Confirm & Import.`;
+    statusEl.className = "status-msg ok";
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+
+function renderImportPreview() {
+  const p = IMPORT_PREVIEW;
+  document.getElementById("imp_resultsPanel").style.display = "";
+
+  const unmatchedCount = p.offices.filter(o => o.suggested_office_id == null).length;
+  const mismatchCount = p.offices.filter(o => o.control_match === false).length;
+  document.getElementById("imp_summaryLine").innerHTML =
+    `${p.offices.length} office sheet(s) found for <strong>${p.year} ${p.budget_type}</strong> — ` +
+    `grand total proposed: <strong>${money(p.grand_total_proposed)}</strong>. ` +
+    (unmatchedCount ? `<span style="color:var(--danger);">${unmatchedCount} sheet(s) need you to pick an office below.</span> ` : "") +
+    (mismatchCount ? `<span style="color:var(--danger);">${mismatchCount} sheet(s) have a total that doesn't match the file's own grand-total line — double check those.</span>` : "");
+
+  const skippedEl = document.getElementById("imp_skippedNote");
+  if (p.skipped_sheets && p.skipped_sheets.length) {
+    skippedEl.style.display = "";
+    skippedEl.textContent = `Sheets not treated as office data (summaries/reports/charts, left alone): ${p.skipped_sheets.join(", ")}`;
+  } else {
+    skippedEl.style.display = "none";
+  }
+
+  const officeOptions = p.existing_offices
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+
+  document.getElementById("imp_officeRows").innerHTML = p.offices.map((o, idx) => {
+    const controlBadge = o.control_match
+      ? `<span class="badge" style="background:#d4edda;color:#155724;">matches ${money(o.control_total)}</span>`
+      : `<span class="badge" style="background:#f8d7da;color:#721c24;">file total ${money(o.control_total)} vs computed ${money(o.total_proposed)}</span>`;
+    return `
+      <tr>
+        <td>${o.sheet}</td>
+        <td>${o.office_name_in_file}<div class="hint">${o.office_code || ""} ${o.office_sector || ""}</div></td>
+        <td>
+          <select data-idx="${idx}" class="imp-office-select">
+            <option value="">-- skip this sheet --</option>
+            ${officeOptions}
+          </select>
+        </td>
+        <td>${o.line_count}</td>
+        <td>${o.new_account_count}</td>
+        <td>${money(o.total_proposed)}</td>
+        <td>${controlBadge}</td>
+      </tr>`;
+  }).join("");
+
+  // pre-select each row's suggested office match
+  document.querySelectorAll(".imp-office-select").forEach(sel => {
+    const idx = Number(sel.dataset.idx);
+    const suggested = p.offices[idx].suggested_office_id;
+    if (suggested != null) sel.value = String(suggested);
+  });
+}
+
+document.getElementById("imp_commitBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("imp_commitStatus");
+  if (!IMPORT_PREVIEW) return;
+
+  const rows = Array.from(document.querySelectorAll(".imp-office-select"));
+  const offices = [];
+  rows.forEach(sel => {
+    const idx = Number(sel.dataset.idx);
+    const officeId = sel.value ? Number(sel.value) : null;
+    if (!officeId) return;  // admin chose to skip this sheet
+    const o = IMPORT_PREVIEW.offices[idx];
+    offices.push({ office_id: officeId, office_name_in_file: o.office_name_in_file, lines: o.lines });
+  });
+
+  if (!offices.length) {
+    statusEl.textContent = "Nothing to import — every sheet is set to \"skip\".";
+    statusEl.className = "status-msg error";
+    return;
+  }
+  if (!confirm(`Import ${offices.length} office(s) into the ${IMPORT_PREVIEW.year} ${IMPORT_PREVIEW.budget_type} budget? This writes the Previous Year Actual, Current Annual, and Proposed Amount for every matched line. Existing values for those fields will be overwritten; admin fields (Adjusted Proposal, Approved, remarks) are left untouched.`)) {
+    return;
+  }
+
+  statusEl.textContent = "Importing...";
+  statusEl.className = "status-msg";
+  document.getElementById("imp_commitBtn").disabled = true;
+  try {
+    const supplementalNumber = IMPORT_PREVIEW.budget_type === "supplemental"
+      ? Number(document.getElementById("imp_supNumber").value) : null;
+    if (supplementalNumber) offices.forEach(o => { o.supplemental_number = supplementalNumber; });
+
+    const result = await apiPost("/api/admin/budget-import/commit", {
+      year: IMPORT_PREVIEW.year,
+      budget_type: IMPORT_PREVIEW.budget_type,
+      source_label: document.getElementById("imp_file").files[0]?.name || "budget import",
+      offices,
+    });
+    statusEl.textContent = `Done — updated ${result.offices_updated} office(s), wrote ${result.lines_written} line amount(s), and added ${result.accounts_created} new account(s) to the chart of accounts.`;
+    statusEl.className = "status-msg ok";
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  } finally {
+    document.getElementById("imp_commitBtn").disabled = false;
+  }
+});

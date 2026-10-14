@@ -20,6 +20,7 @@ from auth import (
     get_current_user, require_admin,
 )
 from excel_export import build_report_workbook, build_summary_workbook, build_lbp_form1_workbook
+import budget_import
 
 Base.metadata.create_all(bind=engine)
 
@@ -1622,6 +1623,153 @@ def purge_year(payload: schemas.PurgeYearRequest, db: Session = Depends(get_db),
         "deleted_proposals": proposal_count,
         "deleted_lines": line_count,
         "deleted_attachments": attachment_count,
+    }
+
+
+# -------------------------------------------------------- budget data import --
+# Lets an admin import a per-office "Programmed Appropriation and Obligation
+# by Object of Expenditure" workbook (one sheet per office) straight into
+# the system -- e.g. a newly-issued annual budget data file for a future
+# year. Two-step (preview, then commit) so nothing is written to the
+# database until the admin has reviewed the office matches and confirmed.
+
+@app.post("/api/admin/budget-import/preview")
+async def budget_import_preview(
+    file: UploadFile = File(...),
+    year: int = 2027,
+    budget_type: str = "annual",
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    if budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+
+    raw = await file.read()
+    try:
+        parsed = budget_import.parse_workbook(io.BytesIO(raw))
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Could not read that workbook: {ex}")
+
+    if not parsed["offices"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No office-shaped sheets were found in that workbook (expected one sheet per office, "
+                   "each headed '<OFFICE NAME> (<code>, <SECTOR>)' with Object of Expenditures/Account "
+                   "Code columns)."
+        )
+
+    existing_offices = [(o.id, o.name) for o in db.query(models.Office).all()]
+    existing_accounts = {
+        a.name.strip().lower(): a.id for a in db.query(models.Account).all()
+    }
+
+    grand_total = 0.0
+    for office in parsed["offices"]:
+        office["suggested_office_id"] = budget_import.suggest_office_match(
+            office["office_name_in_file"], existing_offices
+        )
+        new_account_count = 0
+        for line in office["lines"]:
+            match_id = existing_accounts.get(line["name"].strip().lower())
+            line["matched_account_id"] = match_id
+            if match_id is None:
+                new_account_count += 1
+        office["new_account_count"] = new_account_count
+        grand_total += office["total_proposed"]
+
+    return {
+        "year": year,
+        "budget_type": budget_type,
+        "offices": parsed["offices"],
+        "skipped_sheets": parsed["skipped_sheets"],
+        "existing_offices": [{"id": oid, "name": name} for oid, name in existing_offices],
+        "grand_total_proposed": round(grand_total, 2),
+    }
+
+
+@app.post("/api/admin/budget-import/commit")
+def budget_import_commit(payload: dict, db: Session = Depends(get_db),
+                          admin: models.User = Depends(require_admin)):
+    """payload: {year, budget_type, source_label (optional), offices: [
+        {office_id, office_name_in_file, lines: [{classification, code, name,
+         prev_year_actual, current_annual, proposed_amount}, ...]}, ...]}
+    Only offices the admin actually confirmed (with a real office_id) should
+    be included -- the preview step is what lets the admin leave out/fix
+    anything that didn't match."""
+    year = payload.get("year")
+    budget_type = payload.get("budget_type", "annual")
+    offices_in = payload.get("offices") or []
+    source_label = payload.get("source_label") or "budget import"
+
+    if not year or not isinstance(year, int):
+        raise HTTPException(status_code=400, detail="A valid integer year is required.")
+    if budget_type not in ("annual", "supplemental"):
+        raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+    if not offices_in:
+        raise HTTPException(status_code=400, detail="No offices to import -- nothing was confirmed.")
+
+    offices_updated = 0
+    lines_written = 0
+    accounts_created = 0
+
+    for office_entry in offices_in:
+        office_id = office_entry.get("office_id")
+        office = db.query(models.Office).get(office_id) if office_id else None
+        if not office:
+            continue  # admin chose to skip/couldn't match this one -- leave it alone
+
+        proposal = get_or_create_proposal(db, office.id, year, budget_type,
+                                           office_entry.get("supplemental_number"))
+
+        for line in office_entry.get("lines") or []:
+            name = (line.get("name") or "").strip()
+            if not name:
+                continue
+            classification = line.get("classification")
+            code = str(line.get("code") or "").strip()
+
+            account = find_duplicate_account_name(db, name)
+            if not account:
+                if classification not in ("PS", "MOOE", "CO", "FE"):
+                    continue  # can't create an account without a known classification
+                account = models.Account(classification=classification, code=code or "", name=name)
+                db.add(account)
+                db.flush()
+                accounts_created += 1
+                # keep every other proposal's line set consistent, same as
+                # the regular "create account" endpoint does
+                for p in db.query(models.Proposal).filter(models.Proposal.id != proposal.id).all():
+                    if not db.query(models.ProposalLine).filter(
+                        models.ProposalLine.proposal_id == p.id, models.ProposalLine.account_id == account.id
+                    ).first():
+                        db.add(models.ProposalLine(proposal_id=p.id, account_id=account.id))
+
+            pl = db.query(models.ProposalLine).filter(
+                models.ProposalLine.proposal_id == proposal.id,
+                models.ProposalLine.account_id == account.id,
+            ).first()
+            if not pl:
+                pl = models.ProposalLine(proposal_id=proposal.id, account_id=account.id)
+                db.add(pl)
+                db.flush()
+
+            pl.prev_year_actual = line.get("prev_year_actual") or 0
+            pl.current_annual = line.get("current_annual") or 0
+            pl.proposed_amount = line.get("proposed_amount") or 0
+            lines_written += 1
+
+        log_action(
+            db, proposal, admin, "budget_imported",
+            detail=f"Imported {len(office_entry.get('lines') or [])} line(s) from {source_label} "
+                   f"({year} {budget_type})."
+        )
+        offices_updated += 1
+        db.commit()
+
+    return {
+        "offices_updated": offices_updated,
+        "lines_written": lines_written,
+        "accounts_created": accounts_created,
     }
 
 

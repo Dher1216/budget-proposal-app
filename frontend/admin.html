@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Budget Proposal System</title>
-<link rel="stylesheet" href="css/app.css?v=20261008">
+<link rel="stylesheet" href="css/app.css?v=20261014">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -25,6 +25,7 @@
     <button class="tab-btn" data-tab="offices">Offices</button>
     <button class="tab-btn" data-tab="users">Users</button>
     <button class="tab-btn" data-tab="backup">Backup &amp; Cleanup</button>
+    <button class="tab-btn" data-tab="import">Import Budget</button>
   </div>
 
   <!-- ================= PROPOSALS TAB (approve amounts) ================= -->
@@ -533,7 +534,74 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261008"></script>
-<script src="js/admin.js?v=20261008"></script>
+  <div class="tab-panel" id="tab-import">
+    <div class="panel">
+      <h3 style="margin-top:0;">Import a per-office budget workbook</h3>
+      <p class="hint">
+        Upload a "Programmed Appropriation and Obligation by Object of Expenditure" workbook with one sheet
+        per office (e.g. a newly-issued annual budget data file for a future year). This reads every
+        office's sheet, shows you exactly what it found and which existing office each one matches
+        <strong>before anything is saved</strong> — nothing is written to the system until you review the
+        matches below and click Confirm &amp; Import. Any account name not already in the chart of
+        accounts is added automatically. Download a backup (Backup &amp; Cleanup tab) first if you want an
+        extra safety net.
+      </p>
+      <div class="filter-row">
+        <div class="field">
+          <label>Workbook (.xlsx)</label>
+          <input type="file" id="imp_file" accept=".xlsx">
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="imp_year" value="2027">
+        </div>
+        <div class="field">
+          <label>Budget type</label>
+          <select id="imp_budgetType">
+            <option value="annual">Annual</option>
+            <option value="supplemental">Supplemental</option>
+          </select>
+        </div>
+        <div class="field" id="imp_supField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="imp_supNumber" value="1" min="1">
+        </div>
+        <div class="field">
+          <button class="btn" id="imp_previewBtn">Preview Import</button>
+        </div>
+      </div>
+      <div class="status-msg" id="imp_previewStatus"></div>
+    </div>
+
+    <div class="panel" id="imp_resultsPanel" style="display:none;">
+      <h3 style="margin-top:0;">Review matches</h3>
+      <p class="hint" id="imp_summaryLine"></p>
+      <div id="imp_skippedNote" class="hint" style="display:none;"></div>
+      <div class="table-wrap">
+        <table class="data-table" id="imp_officeTable">
+          <thead>
+            <tr>
+              <th>Sheet</th>
+              <th>Office name (from file)</th>
+              <th>Matches existing office</th>
+              <th>Lines</th>
+              <th>New accounts</th>
+              <th>Total proposed</th>
+              <th>Control check</th>
+            </tr>
+          </thead>
+          <tbody id="imp_officeRows"></tbody>
+        </table>
+      </div>
+      <div class="table-scroll-hint">Scroll sideways to see all columns.</div>
+      <div style="margin-top:12px;">
+        <button class="btn" id="imp_commitBtn">Confirm &amp; Import</button>
+      </div>
+      <div class="status-msg" id="imp_commitStatus"></div>
+    </div>
+  </div>
+
+<script src="js/api.js?v=20261014"></script>
+<script src="js/admin.js?v=20261014"></script>
 </body>
 </html>

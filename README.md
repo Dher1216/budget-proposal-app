@@ -132,6 +132,24 @@ proposals across offices, then exporting the final report to Excel.
   `CACHE_VERSION` in `frontend/sw.js` to match the `?v=...` value used in
   the HTML files — otherwise offline users stay stuck on the old cached
   version.
+- **Import Budget tab** (admin) — upload a per-office "Programmed
+  Appropriation and Obligation by Object of Expenditure" workbook (one
+  sheet per office, e.g. a newly-issued annual budget data file for a
+  future year) and it reads every office's figures — Past Year Actual,
+  Current Year Total, and the Budget Year Proposed amount — straight into
+  the matching proposal for every account line. Nothing is written until
+  you review a preview: it shows which existing office each sheet matches
+  (auto-suggested, always overridable from a dropdown), flags any sheet it
+  couldn't confidently match, and cross-checks its own totals against each
+  sheet's own "TOTAL APPROPRIATION" line so a parsing mistake would show up
+  immediately as a mismatch rather than silently importing wrong numbers.
+  Re-running an import is safe (it updates the same lines rather than
+  duplicating them), and any account name in the file that isn't already in
+  the chart of accounts is added automatically. Admin-only fields (Adjusted
+  Proposal, Approved, remarks) are never touched by an import. This only
+  imports expenditure lines per office — it doesn't touch Fund Sources or
+  Special Purpose Appropriations, which still need to be entered on the
+  Funding tab as usual for a new budget cycle.
 
 ## Running it locally (to try it out)
 
@@ -187,6 +205,17 @@ wiped, and let Render's free tier just run the app.
    itself, because some Windows Python versions fail to install it locally
    with a confusing "pg_config not found" error that has nothing to do with
    your setup. Render's Linux servers install it without any issue.)
+
+   **If the build command ever gets reset** (e.g. back to just
+   `pip install -r requirements.txt`), the deploy will crash with
+   `ModuleNotFoundError: No module named 'psycopg2'` — go back to Render's
+   dashboard → your service → Settings → Build & Deploy and re-set it to
+   the command above. `render.yaml` in the repo root documents this exact
+   command for reference (and can recreate the service correctly from
+   scratch via Render's "New → Blueprint" option), but it does **not**
+   automatically fix an existing service's settings — Render only reads
+   `render.yaml` for services created as, or explicitly switched to, a
+   Blueprint.
 5. Deploy. The app now runs on Render's free tier, but all its data —
    proposals, accounts, users, and attachments — lives permanently in Neon,
    so nothing is lost when Render restarts or redeploys the service.
