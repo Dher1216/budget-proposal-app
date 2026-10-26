@@ -2,33 +2,8 @@
 // by the same FastAPI app (the default), leave this empty.
 const API_BASE = "";
 
-// Registers the service worker that caches this app's own HTML/CSS/JS so
-// the pages load even with no internet connection at all (e.g. after a
-// restart while offline). Only caches static files -- never touches API
-// calls, which the rest of this file already handles for offline use.
-//
-// Served from the SITE ROOT ("/sw.js", not "/app/sw.js") so its default
-// scope covers the whole site, including the bare domain -- not just pages
-// under /app/. Also cleans up the old /app/-scoped registration from
-// before this fix, so anyone who already has it ends up with the full
-// site-wide version instead of two overlapping registrations.
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", async () => {
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      for (const reg of regs) {
-        if (reg.scope.endsWith("/app/")) {
-          await reg.unregister();
-        }
-      }
-    } catch (e) { /* not fatal -- registering the new one below still helps */ }
-
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // Not fatal -- the app still works online, it just won't be able to
-      // load itself with zero connectivity until this succeeds once.
-    });
-  });
-}
+// The service worker (instant opening from saved screens) is registered in
+// js/pwa.js, which every page loads right after this file.
 
 function getToken() { return localStorage.getItem("budget_token"); }
 function getRole() { return localStorage.getItem("budget_role"); }
@@ -47,6 +22,18 @@ function saveSession(data) {
 function clearSession() {
   ["budget_token", "budget_role", "budget_office_id", "budget_office_name", "budget_username"]
     .forEach(k => localStorage.removeItem(k));
+  clearSavedViews();
+}
+
+// Removes the last-seen copies of data views (budget figures saved by
+// apiGet for offline viewing) so they don't stay on a shared phone after
+// someone signs out or their session expires.
+function clearSavedViews() {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith("cache:"))
+      .forEach(k => localStorage.removeItem(k));
+  } catch (e) { /* storage unavailable -- nothing to clear */ }
 }
 
 function requireLogin(expectedRole) {
@@ -57,9 +44,33 @@ function requireLogin(expectedRole) {
   }
 }
 
-function logout() {
+async function logout() {
+  // Edits made offline and not yet synced are the one thing signing out would
+  // lose -- make sure that's what the person wants before wiping anything.
+  try {
+    const pending = await getPendingWrites();
+    if (pending.length) {
+      const ok = confirm(`You have ${pending.length} change(s) saved on this device that haven't synced yet. ` +
+        `Signing out will discard them. Sign out anyway?`);
+      if (!ok) return;
+    }
+    await clearOfflineDeviceData();
+  } catch (e) { /* offline storage unavailable -- carry on signing out */ }
   clearSession();
   window.location.href = "/app/index.html";
+}
+
+// Empties the on-device offline store (queued edits and downloaded
+// attachment copies) -- called when signing out.
+async function clearOfflineDeviceData() {
+  const db = await openOfflineDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(["pendingWrites", "attachmentCache"], "readwrite");
+    tx.objectStore("pendingWrites").clear();
+    tx.objectStore("attachmentCache").clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 function handleUnauthorized() {

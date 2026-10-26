@@ -2094,13 +2094,40 @@ if os.path.isdir(FRONTEND_DIR):
     def root():
         return RedirectResponse(url="/app/")
 
+    def _frontend_fingerprint() -> str:
+        """Short hash of every frontend file (except sw.js itself). Changes
+        whenever any screen, script, style or icon changes, which gives the
+        service worker a new cache version on every code change -- so
+        people never see old screens for long, with no manual bumping."""
+        import hashlib
+        h = hashlib.sha1()
+        for root, _dirs, files in sorted(os.walk(FRONTEND_DIR)):
+            for name in sorted(files):
+                if name == "sw.js":
+                    continue
+                path = os.path.join(root, name)
+                h.update(os.path.relpath(path, FRONTEND_DIR).encode())
+                with open(path, "rb") as f:
+                    h.update(f.read())
+        return h.hexdigest()[:12]
+
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     @app.get("/sw.js")
     def service_worker():
         """Served from the SITE ROOT (not /app/sw.js) specifically so its
         default registration scope covers the entire origin, including the
-        bare domain -- not just pages under /app/. This matters because
-        people naturally bookmark/type the bare site address, which would
-        otherwise fall outside the service worker's coverage and fail to
-        load offline."""
+        bare domain -- not just pages under /app/. The cache version inside
+        is stamped with a fingerprint of the frontend files, and the file is
+        sent with no-cache headers so browsers always pick up updates."""
         sw_path = os.path.join(FRONTEND_DIR, "sw.js")
-        return FileResponse(sw_path, media_type="application/javascript")
+        with open(sw_path, "r", encoding="utf-8") as f:
+            body = f.read().replace("__BUILD_VERSION__", _frontend_fingerprint())
+        return Response(body, media_type="application/javascript", headers=_NO_CACHE)
+
+    @app.get("/manifest.webmanifest")
+    def web_app_manifest():
+        return FileResponse(
+            os.path.join(FRONTEND_DIR, "manifest.webmanifest"),
+            media_type="application/manifest+json", headers=_NO_CACHE,
+        )

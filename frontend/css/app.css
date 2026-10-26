@@ -372,3 +372,36 @@ ul.simple-list li{
   display:flex; justify-content:space-between; align-items:center;
   padding:9px 4px; border-bottom:1px solid var(--line); font-size:14px;
 }
+
+/* ---- "server is waking up" notice (shown only if the first request is slow) ---- */
+.waking-notice{
+  position:fixed; top:12px; left:50%; transform:translateX(-50%);
+  z-index:1000; width:calc(100% - 24px); max-width:460px;
+  display:flex; gap:12px; align-items:flex-start;
+  background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-left:4px solid var(--accent);
+  border-radius:var(--radius); padding:12px 14px;
+  font-size:14px; line-height:1.4;
+  box-shadow:0 6px 24px rgba(45,27,78,.18);
+}
+.waking-spinner{
+  flex:0 0 auto; width:18px; height:18px; margin-top:2px;
+  border:2px solid var(--accent); border-right-color:transparent; border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+
+/* ---- phone "Install" banner ---- */
+.install-banner{
+  position:fixed; left:8px; right:8px; bottom:8px; z-index:999;
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:10px 12px; font-size:13.5px;
+  box-shadow:0 6px 24px rgba(45,27,78,.2);
+}
+.install-banner-icon{ border-radius:9px; flex:0 0 auto; }
+.install-banner-text{ flex:1 1 160px; min-width:0; }
+.install-banner-text strong{ display:block; font-size:14px; }
+.install-banner-actions{ display:flex; gap:8px; flex:0 0 auto; }
+.install-banner-actions .btn{ padding:7px 12px; }
+@media print{ .install-banner, .waking-notice{ display:none !important; } }
