@@ -282,7 +282,20 @@ function tableHeader(proposalYear, suppColCount) {
   </tr></thead>`;
 }
 
-function buildRows(lines, { editableApproved = false, editableAdminFields = false, editableOfficeFields = false, suppColCount = 1 } = {}) {
+// True if a proposal line carries any data: a non-zero amount in any column,
+// a remark, or an attached document. Used by the read-only report to leave
+// out accounts nobody has put anything against.
+function lineHasData(l) {
+  const amounts = [l.prev_year_actual, l.current_annual, l.current_total, l.proposed_amount,
+                   l.adjusted_proposal, l.approved_amount,
+                   ...(l.current_supplementals || []).map(s => s.amount)];
+  if (amounts.some(v => Number(v) || 0)) return true;
+  if ((l.remarks || "").trim() || (l.remarks_adjusted || "").trim()) return true;
+  return (l.attachments || []).length > 0;
+}
+
+function buildRows(lines, { editableApproved = false, editableAdminFields = false, editableOfficeFields = false, suppColCount = 1, hideZero = false } = {}) {
+  if (hideZero) lines = lines.filter(lineHasData);
   const byClass = {};
   CLASSIFICATION_ORDER.forEach(c => byClass[c] = []);
   lines.forEach(l => { (byClass[l.classification] ||= []).push(l); });
@@ -715,7 +728,10 @@ document.getElementById("r_load").addEventListener("click", async () => {
     setOfficeLogo("r_officeLogo", data.office_id);
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("r_table").innerHTML =
-      tableHeader(data.year, suppColCount) + "<tbody>" + buildRows(data.lines, { suppColCount }) + "</tbody>";
+      tableHeader(data.year, suppColCount) + "<tbody>" +
+      (buildRows(data.lines, { suppColCount, hideZero: true }) ||
+        `<tr><td colspan="${NUM_TABLE_COLS + suppColCount}">No accounts with amounts in this proposal yet.</td></tr>`) +
+      "</tbody>";
     loadAuditLog(data.id, "r_auditLog");
     loadBalance(year, budget_type, supp, "r_balancePanel");
   } catch (err) {
@@ -1430,7 +1446,13 @@ function summaryTableHeader() {
   </tr></thead>`;
 }
 
+function summaryRowHasData(r) {
+  return [r.total_prev_year_actual, r.total_current_annual, r.total_current_total,
+          r.total_proposed, r.total_adjusted, r.total_approved].some(v => Number(v) || 0);
+}
+
 function buildSummaryRows(rows) {
+  rows = rows.filter(summaryRowHasData); // leave out accounts with nothing against them
   const byClass = {};
   CLASSIFICATION_ORDER.forEach(c => byClass[c] = []);
   rows.forEach(r => { (byClass[r.classification] ||= []).push(r); });
@@ -1505,7 +1527,8 @@ async function loadSummary() {
     sLogo.onload = () => { sLogo.style.display = "block"; };
     sLogo.onerror = () => { sLogo.style.display = "none"; };
     sLogo.src = `/api/branding/default-logo?t=${Date.now()}`;
-    document.getElementById("s_table").innerHTML = summaryTableHeader() + "<tbody>" + buildSummaryRows(data.rows) + "</tbody>";
+    document.getElementById("s_table").innerHTML = summaryTableHeader() + "<tbody>" +
+      (buildSummaryRows(data.rows) || '<tr><td colspan="9">No accounts with amounts for this budget cycle yet.</td></tr>') + "</tbody>";
     loadBalance(year, budget_type, supp, "s_balancePanel");
 
     let fsPath = `/api/fund-sources?year=${year}&budget_type=${budget_type}`;

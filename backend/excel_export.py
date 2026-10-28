@@ -20,6 +20,25 @@ CLASSIFICATION_LABELS = {
 }
 CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA"]
 
+def line_has_data(line: dict) -> bool:
+    """True if a proposal line has any non-zero amount, a remark, or an
+    attached document -- the reports leave out accounts with none of these."""
+    amounts = [line.get("prev_year_actual"), line.get("current_annual"), line.get("current_total"),
+               line.get("proposed_amount"), line.get("adjusted_proposal"), line.get("approved_amount")]
+    amounts += [s.get("amount") for s in (line.get("current_supplementals") or [])]
+    if any(a for a in amounts if a):
+        return True
+    if (line.get("remarks") or "").strip() or (line.get("remarks_adjusted") or "").strip():
+        return True
+    return bool(line.get("attachments"))
+
+
+def summary_row_has_data(row: dict) -> bool:
+    keys = ("total_prev_year_actual", "total_current_annual", "total_current_total",
+            "total_proposed", "total_adjusted", "total_approved")
+    return any(row.get(k) for k in keys)
+
+
 THIN = Side(style="thin", color="000000")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 HEADER_FILL = PatternFill("solid", fgColor="D9D9D9")
@@ -126,6 +145,8 @@ def build_report_workbook(proposal: dict) -> io.BytesIO:
 
     lines_by_class = {k: [] for k in CLASSIFICATION_ORDER}
     for line in proposal["lines"]:
+        if not line_has_data(line):
+            continue  # leave out accounts with nothing against them
         lines_by_class.setdefault(line["classification"], []).append(line)
 
     for classification in CLASSIFICATION_ORDER:
@@ -278,6 +299,8 @@ def build_summary_workbook(report: dict) -> io.BytesIO:
     grand = [0.0] * 6
     rows_by_class = {k: [] for k in CLASSIFICATION_ORDER}
     for r in report["rows"]:
+        if not summary_row_has_data(r):
+            continue  # leave out accounts with nothing against them
         rows_by_class.setdefault(r["classification"], []).append(r)
 
     for classification in CLASSIFICATION_ORDER:
@@ -493,6 +516,8 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
     r = section_row(r, "III. EXPENDITURES")
     rows_by_class = {k: [] for k in CLASSIFICATION_ORDER}
     for row_data in summary_rows:
+        if not summary_row_has_data(row_data):
+            continue  # leave out accounts with nothing against them
         rows_by_class.setdefault(row_data["classification"], []).append(row_data)
 
     expenditure_class_totals = {}
