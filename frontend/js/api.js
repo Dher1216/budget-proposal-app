@@ -160,10 +160,66 @@ function attachmentDownloadUrl(id) {
   return API_BASE + `/api/attachments/${id}/download`;
 }
 
+// ---- download feedback ------------------------------------------------------
+// Excel / LBP Form / backup downloads are built on the server and can take a
+// few seconds, during which nothing seemed to happen. This shows a spinner on
+// the button plus a toast with a running timer until the file arrives, then
+// confirms "Downloaded" -- or the error if it failed.
+let _dlToastTimer = null;
+function showDownloadToast(html, autoHideMs) {
+  let t = document.getElementById("dlToast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "dlToast";
+    t.className = "dl-toast";
+    t.setAttribute("role", "status");
+    document.body.appendChild(t);
+  }
+  t.innerHTML = html;
+  t.classList.add("show");
+  clearTimeout(_dlToastTimer);
+  if (autoHideMs) _dlToastTimer = setTimeout(() => t.classList.remove("show"), autoHideMs);
+}
+function hideDownloadToast() {
+  const t = document.getElementById("dlToast");
+  if (t) t.classList.remove("show");
+}
+
+async function downloadFileWithFeedback({ button, path, filename, label = "file", fetchFn }) {
+  const original = button ? button.innerHTML : "";
+  const started = Date.now();
+  if (button) { button.disabled = true; button.innerHTML = '<span class="spinner"></span> Preparing…'; }
+  const tick = () => showDownloadToast(
+    `<span class="spinner"></span> Preparing ${label}… ${Math.floor((Date.now() - started) / 1000)}s — it will download automatically.`);
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const res = fetchFn ? await fetchFn() : await fetch(path, { headers: { Authorization: "Bearer " + getToken() } });
+    if (!res.ok) throw new Error("Could not download — check your connection and try again.");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    clearInterval(timer);
+    showDownloadToast(`✓ Downloaded ${filename}`, 3500);
+    if (button) { button.innerHTML = "✓ Downloaded"; setTimeout(() => { button.innerHTML = original; }, 1800); }
+  } catch (err) {
+    clearInterval(timer);
+    hideDownloadToast();
+    if (button) button.innerHTML = original;
+    alert(err.message);
+  } finally {
+    clearInterval(timer);
+    if (button) button.disabled = false;
+  }
+}
+
 async function downloadAttachment(id, filename) {
   try {
     let blob = await getCachedAttachment(id);
     if (!blob) {
+      showDownloadToast('<span class="spinner"></span> Downloading ' + filename + '…');
       const res = await fetch(attachmentDownloadUrl(id), {
         headers: { "Authorization": "Bearer " + getToken() }
       });
@@ -174,7 +230,9 @@ async function downloadAttachment(id, filename) {
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
+    showDownloadToast("✓ Downloaded " + filename, 3000);
   } catch (err) {
+    hideDownloadToast();
     alert(navigator.onLine ? err.message : "This file isn't available offline yet — it needs to be opened once while online first.");
   }
 }

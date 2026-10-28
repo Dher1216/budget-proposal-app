@@ -45,6 +45,13 @@ def ensure_new_columns():
                 conn.execute(text(f"ALTER TABLE proposals ADD COLUMN locked_by_admin {boolean_type} NOT NULL {default_clause}"))
                 print("Migration: added proposals.locked_by_admin")
 
+        if "proposal_lines" in existing_tables:
+            existing_cols = {c["name"] for c in inspector.get_columns("proposal_lines")}
+            if "spa_portion" not in existing_cols:
+                float_type = "DOUBLE PRECISION" if is_postgres else "FLOAT"
+                conn.execute(text(f"ALTER TABLE proposal_lines ADD COLUMN spa_portion {float_type}"))
+                print("Migration: added proposal_lines.spa_portion")
+
         if "special_purpose_appropriations" in existing_tables:
             existing_cols = {c["name"] for c in inspector.get_columns("special_purpose_appropriations")}
             if "amount_override" not in existing_cols:

@@ -170,7 +170,9 @@ def pull_supplementals_into_annual(db: Session, office_id: int, annual_year: int
     updated = 0
     for sp in supps:
         n = sp.supplemental_number or 1
-        amounts = {l.account_id: supplemental_budgeted_amount(l) for l in sp.lines}
+        # the 20% DF / 5% LDRRMF part of a line is supplemental-report-only
+        amounts = {l.account_id: max(supplemental_budgeted_amount(l) - (l.spa_portion or 0), 0)
+                   for l in sp.lines}
         # make sure every line of the annual proposal carries this column
         for acct_id in amounts:
             if acct_id not in lines_by_acct:
@@ -2348,6 +2350,7 @@ def supplemental_import_commit(payload: dict, db: Session = Depends(get_db),
                 db.add(pl)
                 db.flush()
             amount = line.get("amount") or 0
+            pl.spa_portion = line.get("spa_amount") or 0
             if "proposed" in fields:
                 pl.proposed_amount = amount
             if "adjusted" in fields:

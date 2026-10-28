@@ -188,6 +188,12 @@ class ProposalLine(Base):
     adjusted_proposal = Column(Float, nullable=True)
     remarks_adjusted = Column(Text, nullable=True)
 
+    # Supplemental budgets only: the part of this line's amount that is the
+    # 20% Development Fund project breakdown (PPDO) or the 5% LDRRMF
+    # (PDRRMO). That portion belongs to the supplemental report only and is
+    # NOT carried into the next annual budget's reference columns.
+    spa_portion = Column(Float, nullable=True)
+
     proposal = relationship("Proposal", back_populates="lines")
     account = relationship("Account")
     attachments = relationship("ProposalLineAttachment", back_populates="line", cascade="all, delete-orphan")

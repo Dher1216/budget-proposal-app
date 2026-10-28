@@ -285,7 +285,7 @@ def _parse_form9(ws):
     dev20 = {}        # code -> line   (project breakdown of the 20% Development Fund)
 
     def add_line(target: dict, code, amount, obj, purpose):
-        ln = target.setdefault(code, {"code": code, "amount": 0.0, "object_hint": "", "particulars": []})
+        ln = target.setdefault(code, {"code": code, "amount": 0.0, "spa_amount": 0.0, "object_hint": "", "particulars": []})
         ln["amount"] += amount
         if obj and not ln["object_hint"]:
             ln["object_hint"] = obj
@@ -402,18 +402,20 @@ def parse_supplemental_workbook(file_bytes) -> dict:
     dev20_total = round(sum(l["amount"] for l in dev20.values()), 2)
     if ppdo_name:
         for code, ln in dev20.items():
-            tgt = buckets[ppdo_name].setdefault(code, {"code": code, "amount": 0.0, "object_hint": ln["object_hint"], "particulars": []})
+            tgt = buckets[ppdo_name].setdefault(code, {"code": code, "amount": 0.0, "spa_amount": 0.0, "object_hint": ln["object_hint"], "particulars": []})
             tgt["amount"] += ln["amount"]
+            tgt["spa_amount"] += ln["amount"]   # 20% DF project money: supplemental report only
             tgt["particulars"] = (tgt["particulars"] + ln["particulars"])[:6]
     if pdrrmo_name:
         buckets[pdrrmo_name]["LDRRMF"] = {
-            "code": "LDRRMF", "amount": ldrrmf_amount, "object_hint": LDRRMF_ACCOUNT_NAME, "particulars": ["5% LDRRMF"],
+            "code": "LDRRMF", "amount": ldrrmf_amount, "spa_amount": ldrrmf_amount, "object_hint": LDRRMF_ACCOUNT_NAME, "particulars": ["5% LDRRMF"],
         }
 
     offices = []
     grand = 0.0
     for name in order:
-        lines = [dict(l, amount=round(l["amount"], 2)) for l in buckets[name].values() if l["amount"]]
+        lines = [dict(l, amount=round(l["amount"], 2), spa_amount=round(l.get("spa_amount", 0.0), 2))
+                 for l in buckets[name].values() if l["amount"]]
         if not lines:
             continue
         total = round(sum(l["amount"] for l in lines), 2)

@@ -742,18 +742,12 @@ document.getElementById("r_load").addEventListener("click", async () => {
 document.getElementById("r_download").addEventListener("click", async () => {
   if (!currentReport) { await document.getElementById("r_load").click(); }
   if (!currentReport) return;
-  const url = `/api/proposal/${currentReport.id}/excel`;
-  try {
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + getToken() } });
-    if (!res.ok) throw new Error("Could not download — check your connection.");
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${currentReport.office_name}_${currentReport.budget_type}_${currentReport.year}.xlsx`;
-    a.click();
-  } catch (err) {
-    alert(err.message);
-  }
+  await downloadFileWithFeedback({
+    button: document.getElementById("r_download"),
+    path: `/api/proposal/${currentReport.id}/excel`,
+    filename: `${currentReport.office_name}_${currentReport.budget_type}_${currentReport.year}.xlsx`,
+    label: "the Excel report",
+  });
 });
 
 // -------------------------------------------------------------- accounts --
@@ -1409,17 +1403,10 @@ document.getElementById("s_downloadLbp").addEventListener("click", async () => {
   const supp = document.getElementById("s_supplementalNumber").value;
   let path = `/api/admin/lbp-form1-excel?year=${year}&budget_type=${budget_type}`;
   if (budget_type === "supplemental") path += `&supplemental_number=${supp}`;
-  try {
-    const res = await fetch(path, { headers: { Authorization: "Bearer " + getToken() } });
-    if (!res.ok) throw new Error("Could not download — check your connection.");
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `LBP_Form1_${budget_type}_${year}.xlsx`;
-    a.click();
-  } catch (err) {
-    alert(err.message);
-  }
+  await downloadFileWithFeedback({
+    button: document.getElementById("s_downloadLbp"),
+    path, filename: `LBP_Form1_${budget_type}_${year}.xlsx`, label: "LBP Form 1",
+  });
 });
 
 // ------------------------------------------------------------------ init --
@@ -1595,17 +1582,10 @@ document.getElementById("s_download").addEventListener("click", async () => {
   const supp = document.getElementById("s_supplementalNumber").value;
   let path = `/api/admin/summary-report/excel?year=${year}&budget_type=${budget_type}`;
   if (budget_type === "supplemental") path += `&supplemental_number=${supp}`;
-  try {
-    const res = await fetch(path, { headers: { Authorization: "Bearer " + getToken() } });
-    if (!res.ok) throw new Error("Could not download — check your connection.");
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `Summary_${budget_type}_${year}.xlsx`;
-    a.click();
-  } catch (err) {
-    alert(err.message);
-  }
+  await downloadFileWithFeedback({
+    button: document.getElementById("s_download"),
+    path, filename: `Summary_${budget_type}_${year}.xlsx`, label: "the summary Excel",
+  });
 });
 
 // -------------------------------------------------------------- prorate tool
@@ -1692,21 +1672,12 @@ document.getElementById("bk_downloadBtn").addEventListener("click", async () => 
   const statusEl = document.getElementById("bk_downloadStatus");
   statusEl.textContent = "Preparing backup... this may take a moment if there are many attachments.";
   statusEl.className = "status-msg";
-  try {
-    const res = await fetch("/api/admin/backup", { headers: { Authorization: "Bearer " + getToken() } });
-    if (!res.ok) throw new Error("Backup failed — check your connection and try again.");
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-    a.download = `budget_app_backup_${stamp}.zip`;
-    a.click();
-    statusEl.textContent = "Backup downloaded.";
-    statusEl.className = "status-msg ok";
-  } catch (err) {
-    statusEl.textContent = err.message;
-    statusEl.className = "status-msg error";
-  }
+  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+  await downloadFileWithFeedback({
+    button: document.getElementById("bk_downloadBtn"),
+    path: "/api/admin/backup", filename: `budget_app_backup_${stamp}.zip`, label: "the backup",
+  });
+  statusEl.textContent = "";
 });
 
 document.getElementById("bk_cleanupAttachments").addEventListener("click", async () => {

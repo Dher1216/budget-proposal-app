@@ -339,19 +339,12 @@ document.getElementById("c_editBtn").addEventListener("click", async () => {
 
 document.getElementById("c_downloadBtn").addEventListener("click", async () => {
   if (!currentProposal) return;
-  try {
-    const res = await fetch(`/api/proposal/${currentProposal.id}/excel`, {
-      headers: { Authorization: "Bearer " + getToken() }
-    });
-    if (!res.ok) throw new Error("Could not download — check your connection.");
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${getOfficeName()}_${currentProposal.budget_type}_${currentProposal.year}.xlsx`;
-    a.click();
-  } catch (err) {
-    alert(err.message);
-  }
+  await downloadFileWithFeedback({
+    button: document.getElementById("c_downloadBtn"),
+    path: `/api/proposal/${currentProposal.id}/excel`,
+    filename: `${getOfficeName()}_${currentProposal.budget_type}_${currentProposal.year}.xlsx`,
+    label: "your Excel file",
+  });
 });
 
 // Auto-load current year's annual proposal on first visit.
