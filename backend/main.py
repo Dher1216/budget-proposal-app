@@ -16,7 +16,7 @@ from sqlalchemy import or_, func
 
 import models
 import schemas
-from database import get_db, engine, Base
+from database import get_db, engine, Base, SessionLocal
 from auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin,
@@ -171,8 +171,14 @@ def pull_supplementals_into_annual(db: Session, office_id: int, annual_year: int
     for sp in supps:
         n = sp.supplemental_number or 1
         # the 20% DF / 5% LDRRMF part of a line is supplemental-report-only
-        amounts = {l.account_id: max(supplemental_budgeted_amount(l) - (l.spa_portion or 0), 0)
-                   for l in sp.lines}
+        # (the 5% LDRRMF account is supplemental-only by definition, so it is
+        # excluded even on lines imported before the marker existed)
+        ldrrmf_norm = _normalize_account_name(budget_import.LDRRMF_ACCOUNT_NAME)
+        amounts = {
+            l.account_id: 0 if _normalize_account_name(l.account.name) == ldrrmf_norm
+            else max(supplemental_budgeted_amount(l) - (l.spa_portion or 0), 0)
+            for l in sp.lines
+        }
         # make sure every line of the annual proposal carries this column
         for acct_id in amounts:
             if acct_id not in lines_by_acct:
@@ -192,6 +198,43 @@ def pull_supplementals_into_annual(db: Session, office_id: int, annual_year: int
     db.commit()
     return updated
 
+
+
+def resync_all_supplemental_links(db: Session) -> int:
+    """Re-runs the supplemental -> next-year annual pull for every office that
+    has a supplemental proposal. Also marks the 5% LDRRMF lines of older
+    supplemental imports as supplemental-only. Safe to run any number of
+    times; it only rewrites the annual 'Supplemental No. N' reference columns."""
+    ldrrmf_norm = _normalize_account_name(budget_import.LDRRMF_ACCOUNT_NAME)
+    supps = db.query(models.Proposal).filter(models.Proposal.budget_type == "supplemental").all()
+    for sp in supps:
+        for l in sp.lines:
+            if l.spa_portion is None and _normalize_account_name(l.account.name) == ldrrmf_norm:
+                l.spa_portion = l.proposed_amount or 0
+    db.commit()
+    pairs = {(sp.office_id, sp.year) for sp in supps}
+    n = 0
+    for office_id, year in pairs:
+        n += pull_supplementals_into_annual(db, office_id, year + 1)
+    return n
+
+
+@app.on_event("startup")
+def _resync_supplemental_links_on_startup():
+    """Cleans up annual reference columns filled by an earlier version that
+    still carried the supplemental-only 5% LDRRMF amount."""
+    db = SessionLocal()
+    try:
+        resync_all_supplemental_links(db)
+    except Exception as ex:   # never block the app from starting
+        print("Supplemental link resync skipped:", ex)
+    finally:
+        db.close()
+
+
+@app.post("/api/admin/resync-supplemental-links")
+def resync_supplemental_links(db: Session = Depends(get_db), admin: models.User = Depends(require_admin)):
+    return {"annual_proposals_updated": resync_all_supplemental_links(db)}
 
 
 def enforce_office_access(user: models.User, office_id: int):

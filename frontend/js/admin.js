@@ -1744,6 +1744,24 @@ document.getElementById("imp_budgetType").addEventListener("change", (e) => {
   document.getElementById("imp_suppHelp").style.display = supp ? "" : "none";
 });
 
+document.getElementById("imp_resyncBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("imp_resyncBtn");
+  const statusEl = document.getElementById("imp_resyncStatus");
+  const original = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Re-syncing…';
+  statusEl.textContent = ""; 
+  try {
+    const r = await apiPost("/api/admin/resync-supplemental-links", {});
+    statusEl.textContent = `Done — refreshed ${r.annual_proposals_updated} supplemental column(s) in the annual budgets.`;
+    statusEl.className = "status-msg ok";
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  } finally {
+    btn.disabled = false; btn.innerHTML = original;
+  }
+});
+
 function selectedImportFields() {
   return Array.from(document.querySelectorAll(".imp-field:checked")).map(c => c.value);
 }
