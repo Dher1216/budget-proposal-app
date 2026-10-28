@@ -12,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/app/icons/favicon-32.png">
 <link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=20261028e">
+<link rel="stylesheet" href="css/app.css?v=20261028f">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -38,7 +38,7 @@
 
   <!-- ================= PROPOSALS TAB (approve amounts) ================= -->
   <div class="tab-panel active" id="tab-proposals">
-    <div class="panel">
+    <div class="panel compact-filters">
       <div class="filter-row">
         <div class="field">
           <label>Budget type</label>
@@ -47,7 +47,7 @@
             <option value="supplemental">Supplemental</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field office-field">
           <label>Office</label>
           <select id="p_office"></select>
         </div>
@@ -63,12 +63,13 @@
           <button class="btn secondary" id="p_load">Load proposal</button>
         </div>
       </div>
-      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line);">
-        <p class="hint" style="margin-top:0;">Bulk actions apply to every office's proposal for the Budget type / Year / Supplemental No. selected above — not just the office picked for loading.</p>
-        <button class="btn secondary" id="p_bulkLockBtn">Lock ALL offices for this cycle</button>
-        <button class="btn secondary" id="p_bulkUnlockBtn">Unlock ALL offices for this cycle</button>
-        <div class="status-msg" id="p_bulkStatus"></div>
-      </div>
+      <details class="bulk-details">
+        <summary>Bulk actions for all offices in this cycle</summary>
+        <p class="hint" style="margin:6px 0;">Applies to every office's proposal for the Budget type / Year / Supplemental No. selected above — not just the office picked for loading.</p>
+        <button class="btn secondary" id="p_bulkLockBtn">Lock ALL offices</button>
+        <button class="btn secondary" id="p_bulkUnlockBtn">Unlock ALL offices</button>
+      </details>
+      <div class="status-msg" id="p_bulkStatus"></div>
     </div>
 
     <div class="panel" id="p_result" style="display:none;">
@@ -108,7 +109,7 @@
 
   <!-- ================= REPORTS TAB (view + download) ================= -->
   <div class="tab-panel" id="tab-reports">
-    <div class="panel">
+    <div class="panel compact-filters">
       <div class="filter-row">
         <div class="field">
           <label>Budget type</label>
@@ -117,7 +118,7 @@
             <option value="supplemental">Supplemental</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field office-field">
           <label>Office</label>
           <select id="r_office"></select>
         </div>
@@ -648,8 +649,8 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261028e"></script>
-<script src="js/pwa.js?v=20261028e"></script>
-<script src="js/admin.js?v=20261028e"></script>
+<script src="js/api.js?v=20261028f"></script>
+<script src="js/pwa.js?v=20261028f"></script>
+<script src="js/admin.js?v=20261028f"></script>
 </body>
 </html>

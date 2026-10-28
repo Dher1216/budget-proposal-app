@@ -438,5 +438,41 @@ const CLASSIFICATION_LABELS = {
   FE: "Financial Expenses",
   CO: "Capital Outlay",
   SPA: "Special Purpose Appropriations",
+  // Not an account classification: the 20% Development Fund project part of a
+  // supplemental line (PPDO), shown as its own section.
+  DEV20: "20% Development Fund Projects",
 };
-const CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA"];
+const CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA", "DEV20"];
+
+// Separates supplemental lines that carry a 20% Development Fund project
+// portion (spa_portion) into a "DEV20" section.
+//  exact=true  (read-only reports): a line mixing regular money and project
+//    money is split into two rows.
+//  exact=false (editable screens): only lines that are entirely project money
+//    move; a mixed line stays in place (with a note) so it can still be edited
+//    as one amount.
+function splitDev20Lines(lines, exact) {
+  const out = [];
+  lines.forEach(l => {
+    const p = l.spa_portion || 0;
+    if (p <= 0) { out.push(l); return; }
+    const prop = l.proposed_amount || 0;
+    if (!exact) {
+      if (prop - p <= 0.005) out.push({ ...l, classification: "DEV20" });
+      else out.push(l);
+      return;
+    }
+    const adj = l.adjusted_proposal, appr = l.approved_amount;
+    const dp = Math.min(p, prop);
+    out.push({ ...l, spa_portion: 0, proposed_amount: prop - dp,
+      adjusted_proposal: adj == null ? null : adj - Math.min(p, adj),
+      approved_amount: appr == null ? null : appr - Math.min(p, appr),
+      difference: (prop - dp) - (l.current_total || 0) });
+    out.push({ ...l, classification: "DEV20", spa_portion: 0, prev_year_actual: 0, current_annual: 0,
+      current_supplementals: [], current_total: 0, proposed_amount: dp,
+      adjusted_proposal: adj == null ? null : Math.min(p, adj),
+      approved_amount: appr == null ? null : Math.min(p, appr),
+      difference: dp, remarks: null, remarks_adjusted: null, attachments: [] });
+  });
+  return out;
+}

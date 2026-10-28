@@ -17,8 +17,39 @@ CLASSIFICATION_LABELS = {
     "FE": "FINANCIAL EXPENSES",
     "CO": "CAPITAL OUTLAY",
     "SPA": "SPECIAL PURPOSE APPROPRIATIONS",
+    # Not an account classification: the 20% Development Fund project part of
+    # a supplemental line (PPDO), reported as its own section.
+    "DEV20": "20% DEVELOPMENT FUND PROJECTS",
 }
-CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA"]
+CLASSIFICATION_ORDER = ["PS", "MOOE", "FE", "CO", "SPA", "DEV20"]
+
+
+def split_dev20_lines(lines: list) -> list:
+    """Splits supplemental lines that carry a 20% Development Fund project
+    portion (`spa_portion`) into a regular line and a DEV20 line, so the
+    projects are reported in their own section."""
+    out = []
+    for l in lines:
+        p = l.get("spa_portion") or 0
+        if p <= 0:
+            out.append(l)
+            continue
+        prop = l.get("proposed_amount") or 0
+        adj = l.get("adjusted_proposal")
+        appr = l.get("approved_amount")
+        dp = min(p, prop)
+        regular = dict(l, proposed_amount=prop - dp,
+                       adjusted_proposal=None if adj is None else adj - min(p, adj),
+                       approved_amount=None if appr is None else appr - min(p, appr))
+        regular["difference"] = regular["proposed_amount"] - (l.get("current_total") or 0)
+        dev = dict(l, classification="DEV20", prev_year_actual=0, current_annual=0, current_supplementals=[],
+                   current_total=0, proposed_amount=dp,
+                   adjusted_proposal=None if adj is None else min(p, adj),
+                   approved_amount=None if appr is None else min(p, appr),
+                   difference=dp, remarks=None, remarks_adjusted=None, attachments=[])
+        out.append(regular)
+        out.append(dev)
+    return out
 
 def line_has_data(line: dict) -> bool:
     """True if a proposal line has any non-zero amount, a remark, or an
@@ -50,6 +81,7 @@ def build_report_workbook(proposal: dict) -> io.BytesIO:
     """
     proposal: dict shaped like schemas.ProposalOut.
     """
+    proposal = dict(proposal, lines=split_dev20_lines(proposal["lines"]))
     year = proposal["year"]
     prev_year = year - 2
     current_year = year - 1
@@ -508,7 +540,30 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
             non_income_total += fs["amount"]
     r = data_row(r, "TOTAL NON-INCOME RECEIPTS", "", "", "", non_income_total, bold=True, fill=HEADER_FILL)
 
-    total_receipts = beginning_total + local_total + external_total + non_income_total
+    # Supplemental budgets (LBP Form 8) have sources under their own headings
+    # (New Revenue Sources, Savings, Realignment, Reversion ...). They are
+    # listed by group and counted as receipts.
+    known = {BEGINNING_CASH_CAT, LOCAL_TAX_CAT, LOCAL_NONTAX_CAT, NON_INCOME_CAT}
+    other_cats = []
+    for fs in fund_sources:
+        if fs["category"] not in known and not fs["category"].startswith("External Sources") \
+                and fs["category"] not in other_cats:
+            other_cats.append(fs["category"])
+    other_total = 0.0
+    if other_cats:
+        r = section_row(r, "D. SUPPLEMENTAL SOURCES (LBP FORM 8)")
+        for cat in other_cats:
+            r = data_row(r, cat, "", "", "", "", bold=True)
+            sub = 0.0
+            for fs in fund_sources:
+                if fs["category"] == cat:
+                    r = data_row(r, "    " + fs["particulars"], "", "", "", fs["amount"])
+                    sub += fs["amount"]
+            r = data_row(r, f"Total {cat}", "", "", "", sub, bold=True, fill=SECTION_FILL)
+            other_total += sub
+        r = data_row(r, "TOTAL SUPPLEMENTAL SOURCES", "", "", "", other_total, bold=True, fill=HEADER_FILL)
+
+    total_receipts = beginning_total + local_total + external_total + non_income_total + other_total
     r = data_row(r, "TOTAL RECEIPTS", "", "", "", total_receipts, bold=True, fill=HEADER_FILL)
     r += 1
 
@@ -522,7 +577,7 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
 
     expenditure_class_totals = {}
     for classification in CLASSIFICATION_ORDER:
-        if classification == "SPA":
+        if classification in ("SPA", "DEV20"):
             continue  # reported under "D. Special Purpose Appropriations" below
         rows = rows_by_class.get(classification, [])
         if not rows:
@@ -543,11 +598,29 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
     # ---- D. Special Purpose Appropriations ----
     r = section_row(r, "D. SPECIAL PURPOSE APPROPRIATIONS (SPA's)")
     spa_total = 0.0
+    dev20_rows = sorted(rows_by_class.get("DEV20", []), key=lambda x: (x["account_code"], x["account_name"]))
+    spa_acct_rows = sorted(rows_by_class.get("SPA", []), key=lambda x: (x["account_code"], x["account_name"]))
+    is_supp = data.get("budget_type") == "supplemental"
     for spa in spa_rows:
+        # In a supplemental the automatic 20% / 5% are not set aside separately:
+        # they are spent through the actual project lines / LDRRMF account line
+        # listed below, so the automatic figure is left out when those exist.
+        if is_supp and spa.get("auto_computed") == "dev_fund_20pct" and dev20_rows:
+            continue
+        if is_supp and spa.get("auto_computed") == "ldrrmf_5pct" and spa_acct_rows:
+            continue
         r = data_row(r, spa["name"], "", "", "", spa["amount"])
         spa_total += spa["amount"]
+    if dev20_rows:
+        r = data_row(r, "20% DEVELOPMENT FUND PROJECTS", "", "", "", "", bold=True)
+        dev_total = 0.0
+        for row_data in dev20_rows:
+            r = data_row(r, "    " + row_data["account_name"], row_data["account_code"], "", "", row_data["total_proposed"])
+            dev_total += row_data["total_proposed"]
+        r = data_row(r, "Total 20% Development Fund Projects", "", "", "", dev_total, bold=True, fill=SECTION_FILL)
+        spa_total += dev_total
     # office lines under SPA-classified accounts belong in this section too
-    for row_data in sorted(rows_by_class.get("SPA", []), key=lambda x: (x["account_code"], x["account_name"])):
+    for row_data in spa_acct_rows:
         r = data_row(r, row_data["account_name"], row_data["account_code"], "", "", row_data["total_proposed"])
         spa_total += row_data["total_proposed"]
     r = data_row(r, "Total Special Purpose Appropriations", "", "", "", spa_total, bold=True, fill=SECTION_FILL)
@@ -557,7 +630,7 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
     r += 1
 
     # ---- IV. Ending Balance ----
-    ending_balance = total_receipts - total_expenditures
+    ending_balance = round(total_receipts - total_expenditures, 2)
     r = data_row(r, "IV. ENDING BALANCE", "", "", "", ending_balance, bold=True, fill=HEADER_FILL)
 
     widths = [46, 14, 16, 16, 16]

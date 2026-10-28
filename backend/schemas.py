@@ -118,6 +118,9 @@ class ProposalLineOut(BaseModel):
     approved_amount: Optional[float] = None
     remarks: Optional[str] = None
     attachments: List[AttachmentOut] = []
+    # Supplemental only: the part of this line that is a 20% Development Fund
+    # project (PPDO). Shown as its own "20% Development Fund Projects" section.
+    spa_portion: float = 0
 
 
 class ProposalOut(BaseModel):

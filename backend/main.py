@@ -43,6 +43,18 @@ def account_classification_str(a: models.Account) -> str:
     return a.classification.value if hasattr(a.classification, "value") else a.classification
 
 
+def dev20_portion(line: models.ProposalLine) -> float:
+    """The part of a supplemental line that is a 20% Development Fund project
+    (PPDO's breakdown). The 5% LDRRMF account is its own SPA account, so it is
+    never treated as a 20% DF project."""
+    p = line.spa_portion or 0
+    if p <= 0:
+        return 0.0
+    if _normalize_account_name(line.account.name) == _normalize_account_name(budget_import.LDRRMF_ACCOUNT_NAME):
+        return 0.0
+    return p
+
+
 def line_to_out(line: models.ProposalLine) -> schemas.ProposalLineOut:
     supplementals = sorted(line.current_supplementals, key=lambda s: s.supplemental_number)
     supp_total = sum(s.amount or 0 for s in supplementals)
@@ -67,6 +79,7 @@ def line_to_out(line: models.ProposalLine) -> schemas.ProposalLineOut:
         remarks_adjusted=line.remarks_adjusted,
         approved_amount=line.approved_amount,
         remarks=line.remarks,
+        spa_portion=dev20_portion(line),
         attachments=[
             schemas.AttachmentOut(
                 id=a.id, filename=a.filename, uploaded_by=a.uploaded_by,
@@ -1592,14 +1605,34 @@ def summary_report(year: int, budget_type: str, supplemental_number: Optional[in
             supp_total = sum(s.amount or 0 for s in l.current_supplementals)
             current_total = (l.current_annual or 0) + supp_total
             proposed = l.proposed_amount or 0
+            adjusted = l.adjusted_proposal if l.adjusted_proposal is not None else proposed
+            approved = l.approved_amount or 0
+            # Supplemental only: the 20% Development Fund project part of a
+            # line is reported in its own "DEV20" section, not under the
+            # account's regular classification.
+            portion = dev20_portion(l)
+            d_prop, d_adj, d_appr = min(portion, proposed), min(portion, adjusted), min(portion, approved)
             entry["total_prev_year_actual"] += (l.prev_year_actual or 0)
             entry["total_current_annual"] += (l.current_annual or 0)
             entry["total_current_total"] += current_total
-            entry["total_proposed"] += proposed
-            entry["total_adjusted"] += l.adjusted_proposal if l.adjusted_proposal is not None else proposed
-            entry["total_approved"] += (l.approved_amount or 0)
-            if proposed != 0:
+            entry["total_proposed"] += proposed - d_prop
+            entry["total_adjusted"] += adjusted - d_adj
+            entry["total_approved"] += approved - d_appr
+            if proposed - d_prop != 0:
                 entry["offices_included"] += 1
+            if portion > 0:
+                d = totals.setdefault(("DEV20", acc.id), {
+                    "account_id": acc.id, "account_code": acc.code, "account_name": acc.name,
+                    "classification": "DEV20",
+                    "total_prev_year_actual": 0.0, "total_current_annual": 0.0, "total_current_total": 0.0,
+                    "total_proposed": 0.0, "total_adjusted": 0.0, "total_approved": 0.0,
+                    "offices_included": 0,
+                })
+                d["total_proposed"] += d_prop
+                d["total_adjusted"] += d_adj
+                d["total_approved"] += d_appr
+                if d_prop != 0:
+                    d["offices_included"] += 1
 
     rows = [schemas.SummaryAccountRow(**v) for v in totals.values()]
     rows.sort(key=lambda r: (r.classification, r.account_code, r.account_name))

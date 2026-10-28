@@ -143,6 +143,32 @@ button{
 .filter-row .field{ min-width:160px; }
 .filter-row label{ margin-top:0; }
 
+/* Compact filter bar (Proposals / Reports): one tight row instead of a tall panel */
+.compact-filters{ padding:10px 14px; margin-bottom:10px; }
+.compact-filters .filter-row{ gap:8px 10px; }
+.compact-filters .field{ min-width:0; display:flex; flex-direction:column; }
+.compact-filters label{ font-size:11.5px; margin:0 0 2px; }
+.compact-filters select, .compact-filters input[type=number], .compact-filters .office-search{
+  padding:5px 8px; font-size:13px; height:30px; box-sizing:border-box; }
+.compact-filters .btn{ padding:5px 12px; font-size:13px; height:30px; }
+.compact-filters .field > select, .compact-filters .field > input[type=number]{ width:100%; }
+.compact-filters #p_type, .compact-filters #r_type{ width:120px; }
+.compact-filters #p_year, .compact-filters #r_year{ width:78px; }
+.compact-filters #p_supplementalNumber, .compact-filters #r_supplementalNumber{ width:64px; }
+/* office: search box and drop-down side by side, drop-down takes the rest */
+.compact-filters .office-field{ flex:1 1 340px; display:grid; grid-template-columns:130px 1fr; column-gap:6px; }
+.compact-filters .office-field label{ grid-column:1 / -1; }
+.compact-filters .office-field .office-search{ margin:0 !important; }
+.compact-filters .office-field select{ min-width:0; }
+.bulk-details{ margin-top:6px; font-size:13px; }
+.bulk-details summary{ cursor:pointer; color:var(--muted, #5b6472); padding:2px 0; }
+.bulk-details[open] summary{ margin-bottom:2px; }
+.compact-filters .status-msg:empty{ display:none; }
+@media (max-width:640px){
+  .compact-filters .office-field{ grid-template-columns:1fr; row-gap:4px; flex-basis:100%; }
+  .compact-filters #p_type, .compact-filters #r_type{ width:100%; }
+}
+
 .offline-banner{
   background:#F3D9A1;
   color:#5A4200;

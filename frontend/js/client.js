@@ -121,7 +121,7 @@ function buildRows(lines, editable, suppColCount) {
       }
 
       rows += `<tr>
-        <td>${l.account_name}</td>
+        <td>${l.account_name}${(l.spa_portion || 0) > 0 && l.classification !== "DEV20" ? `<div class="hint">includes ₱${money(l.spa_portion)} of 20% Development Fund projects</div>` : ""}</td>
         <td>${l.account_code}</td>
         <td class="num">${money(l.prev_year_actual)}</td>
         <td class="num">${field("current_annual", l.current_annual)}</td>
@@ -189,7 +189,7 @@ function renderProposal(data, fromCache) {
 
   const suppColCount = maxSupplementalCount(data.lines);
   document.getElementById("c_table").innerHTML =
-    tableHeader(data.year, suppColCount) + "<tbody>" + buildRows(data.lines, editable, suppColCount) + "</tbody>";
+    tableHeader(data.year, suppColCount) + "<tbody>" + buildRows(splitDev20Lines(data.lines, false), editable, suppColCount) + "</tbody>";
 
   const statusEl = document.getElementById("c_status");
   statusEl.textContent = fromCache ? "Showing last saved data (offline)." : "";

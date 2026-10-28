@@ -365,8 +365,10 @@ function buildRows(lines, { editableApproved = false, editableAdminFields = fals
           : money(val)}</td>`;
       }
 
+      const dev20Note = (l.spa_portion || 0) > 0 && l.classification !== "DEV20"
+        ? `<div class="hint">includes ₱${money(l.spa_portion)} of 20% Development Fund projects</div>` : "";
       rows += `<tr>
-        <td>${l.account_name}</td>
+        <td>${l.account_name}${dev20Note}</td>
         <td>${l.account_code}</td>
         <td class="num">${prevCell}</td>
         <td class="num">${annualCell}</td>
@@ -490,7 +492,7 @@ document.getElementById("p_load").addEventListener("click", async () => {
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("p_table").innerHTML =
       tableHeader(data.year, suppColCount) + "<tbody>" +
-      buildRows(data.lines, { editableApproved: !isApproved, editableAdminFields: true, editableOfficeFields: isLocked, suppColCount }) +
+      buildRows(splitDev20Lines(data.lines, false), { editableApproved: !isApproved, editableAdminFields: true, editableOfficeFields: isLocked, suppColCount }) +
       "</tbody>";
     if (fromCache) { statusEl.textContent = "Showing last saved data (offline)."; statusEl.className = "status-msg"; }
     loadAuditLog(data.id, "p_auditLog");
@@ -729,7 +731,7 @@ document.getElementById("r_load").addEventListener("click", async () => {
     const suppColCount = maxSupplementalCount(data.lines);
     document.getElementById("r_table").innerHTML =
       tableHeader(data.year, suppColCount) + "<tbody>" +
-      (buildRows(data.lines, { suppColCount, hideZero: true }) ||
+      (buildRows(splitDev20Lines(data.lines, true), { suppColCount, hideZero: true }) ||
         `<tr><td colspan="${NUM_TABLE_COLS + suppColCount}">No accounts with amounts in this proposal yet.</td></tr>`) +
       "</tbody>";
     loadAuditLog(data.id, "r_auditLog");
