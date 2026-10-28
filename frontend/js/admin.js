@@ -1796,7 +1796,9 @@ document.getElementById("imp_previewBtn").addEventListener("click", async () => 
     const formData = new FormData();
     formData.append("file", file);
     const res = await fetch(
-      `/api/admin/budget-import/preview?year=${year}&budget_type=${budgetType}`,
+      budgetType === "supplemental"
+        ? `/api/admin/supplemental-import/preview?year=${year}`   // separate import for supplemental files
+        : `/api/admin/budget-import/preview?year=${year}&budget_type=annual`,
       { method: "POST", headers: { Authorization: "Bearer " + getToken() }, body: formData }
     );
     if (!res.ok) {
@@ -1965,7 +1967,7 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
       ? Number(document.getElementById("imp_supNumber").value) : null;
     if (supplementalNumber) offices.forEach(o => { o.supplemental_number = supplementalNumber; });
 
-    const result = await apiPost("/api/admin/budget-import/commit", {
+    const result = await apiPost(isSupp ? "/api/admin/supplemental-import/commit" : "/api/admin/budget-import/commit", {
       year: IMPORT_PREVIEW.year,
       budget_type: IMPORT_PREVIEW.budget_type,
       source_label: document.getElementById("imp_file").files[0]?.name || "budget import",
