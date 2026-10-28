@@ -137,6 +137,61 @@ def get_or_create_proposal(db: Session, office_id: int, year: int, budget_type: 
     return proposal
 
 
+def supplemental_budgeted_amount(line: models.ProposalLine) -> float:
+    """The amount a supplemental line actually budgeted: the approved figure
+    once there is one, else the admin's adjusted figure, else the proposal."""
+    if line.approved_amount is not None:
+        return line.approved_amount or 0
+    if line.adjusted_proposal is not None:
+        return line.adjusted_proposal or 0
+    return line.proposed_amount or 0
+
+
+def pull_supplementals_into_annual(db: Session, office_id: int, annual_year: int) -> int:
+    """The annual proposal for `annual_year` shows the previous year's
+    supplemental budgets as reference columns ("<year-1> Supplemental No. N").
+    For offices that had a supplemental in annual_year-1, copy each
+    supplemental's budgeted amounts into those columns. Does nothing if the
+    office has no annual proposal for that year yet (it is pulled when that
+    proposal is created/imported). Returns the number of columns updated."""
+    annual = db.query(models.Proposal).filter(
+        models.Proposal.office_id == office_id, models.Proposal.year == annual_year,
+        models.Proposal.budget_type == "annual",
+    ).first()
+    if not annual:
+        return 0
+    supps = db.query(models.Proposal).filter(
+        models.Proposal.office_id == office_id, models.Proposal.year == annual_year - 1,
+        models.Proposal.budget_type == "supplemental",
+    ).all()
+    if not supps:
+        return 0
+    lines_by_acct = {l.account_id: l for l in annual.lines}
+    updated = 0
+    for sp in supps:
+        n = sp.supplemental_number or 1
+        amounts = {l.account_id: supplemental_budgeted_amount(l) for l in sp.lines}
+        # make sure every line of the annual proposal carries this column
+        for acct_id in amounts:
+            if acct_id not in lines_by_acct:
+                nl = models.ProposalLine(proposal_id=annual.id, account_id=acct_id)
+                db.add(nl); db.flush()
+                lines_by_acct[acct_id] = nl
+        for acct_id, line in lines_by_acct.items():
+            existing = next((x for x in line.current_supplementals if x.supplemental_number == n), None)
+            amt = amounts.get(acct_id, 0) or 0
+            if existing:
+                if existing.amount != amt:
+                    existing.amount = amt
+            else:
+                db.add(models.ProposalLineCurrentSupplemental(
+                    proposal_line_id=line.id, supplemental_number=n, amount=amt))
+        updated += 1
+    db.commit()
+    return updated
+
+
+
 def enforce_office_access(user: models.User, office_id: int):
     if user.role == models.Role.client and user.office_id != office_id:
         raise HTTPException(status_code=403, detail="You can only access your own office's data.")
@@ -815,6 +870,8 @@ def save_lines(proposal_id: int, payload: schemas.SaveLinesRequest,
     proposal.last_updated_at = datetime.utcnow()
     db.commit()
     db.refresh(proposal)
+    if proposal.budget_type == "supplemental" or getattr(proposal.budget_type, "value", None) == "supplemental":
+        pull_supplementals_into_annual(db, proposal.office_id, proposal.year + 1)
     return proposal_to_out(proposal)
 
 
@@ -880,6 +937,8 @@ def update_admin_lines(proposal_id: int, payload: schemas.AdminLinesUpdateReques
     proposal.last_updated_at = datetime.utcnow()
     db.commit()
     db.refresh(proposal)
+    if proposal.budget_type == "supplemental" or getattr(proposal.budget_type, "value", None) == "supplemental":
+        pull_supplementals_into_annual(db, proposal.office_id, proposal.year + 1)
     return proposal_to_out(proposal)
 
 
@@ -998,6 +1057,8 @@ def approve_lines(proposal_id: int, payload: schemas.ApproveLinesRequest,
     proposal.last_updated_at = datetime.utcnow()
     db.commit()
     db.refresh(proposal)
+    if proposal.budget_type == "supplemental" or getattr(proposal.budget_type, "value", None) == "supplemental":
+        pull_supplementals_into_annual(db, proposal.office_id, proposal.year + 1)
     return proposal_to_out(proposal)
 
 
@@ -2194,6 +2255,7 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
         )
         offices_updated += 1
         db.commit()
+        pull_supplementals_into_annual(db, office.id, year)   # previous year's supplementals -> reference columns
 
     return {
         "offices_updated": offices_updated,
@@ -2227,6 +2289,7 @@ def supplemental_import_commit(payload: dict, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail="No offices to import -- nothing was confirmed.")
 
     offices_updated = offices_created = lines_written = accounts_created = 0
+    pulled = 0   # annual proposals (next year) whose supplemental reference column was filled
     accounts_by_norm = {}
     for a in db.query(models.Account).all():
         accounts_by_norm.setdefault(_normalize_account_name(a.name), a)
@@ -2298,6 +2361,7 @@ def supplemental_import_commit(payload: dict, db: Session = Depends(get_db),
                           f"(Supplemental No. {supp_no}, {year}) into: {', '.join(fields)}.")
         offices_updated += 1
         db.commit()
+        pulled += pull_supplementals_into_annual(db, office.id, year + 1)
 
     # Funding sources (LBP Form 8) belong only to THIS supplemental.
     fund_sources_written = 0
@@ -2324,6 +2388,7 @@ def supplemental_import_commit(payload: dict, db: Session = Depends(get_db),
         "offices_updated": offices_updated, "offices_created": offices_created,
         "lines_written": lines_written, "accounts_created": accounts_created,
         "fund_sources_written": fund_sources_written,
+        "annual_proposals_updated": pulled,
     }
 
 
