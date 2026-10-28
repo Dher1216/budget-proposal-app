@@ -250,6 +250,11 @@ class SpaOut(BaseModel):
 
 class CleanupAttachmentsRequest(BaseModel):
     year: int
+    # Optional narrowing: only this budget type ("annual" | "supplemental") and,
+    # for supplemental, only this supplemental number. Omitted = everything for the year.
+    budget_type: Optional[str] = None
+    supplemental_number: Optional[int] = None
+    preview: bool = False    # True = just report what would be deleted
 
 
 class PurgeYearRequest(BaseModel):

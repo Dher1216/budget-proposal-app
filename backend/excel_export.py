@@ -221,8 +221,8 @@ def build_report_workbook(proposal: dict) -> io.BytesIO:
                 cell.border = BORDER
                 if col in numeric_cols:
                     cell.number_format = CURRENCY_FMT
-                    cell.alignment = Alignment(horizontal="right")
-                elif col in text_cols:
+                    cell.alignment = Alignment(horizontal="right", vertical="top")
+                elif col in text_cols or col == 1:
                     cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
             for col in numeric_cols:
@@ -361,9 +361,11 @@ def build_summary_workbook(report: dict) -> io.BytesIO:
                 cell.border = BORDER
                 if 3 <= col <= 8:
                     cell.number_format = CURRENCY_FMT
-                    cell.alignment = Alignment(horizontal="right")
+                    cell.alignment = Alignment(horizontal="right", vertical="top")
                 elif col == 9:
-                    cell.alignment = Alignment(horizontal="center")
+                    cell.alignment = Alignment(horizontal="center", vertical="top")
+                elif col == 1:
+                    cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
             for i, key in enumerate(["total_prev_year_actual", "total_current_annual", "total_current_total",
                                       "total_proposed", "total_adjusted", "total_approved"]):
                 section_totals[i] += r[key]
@@ -496,7 +498,9 @@ def build_lbp_form1_workbook(data: dict) -> io.BytesIO:
             cell.border = BORDER
             if col >= 3:
                 cell.number_format = CURRENCY_FMT
-                cell.alignment = Alignment(horizontal="right")
+                cell.alignment = Alignment(horizontal="right", vertical="top")
+            elif col == 1:
+                cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
             if fill:
                 cell.fill = fill
         return row + 1

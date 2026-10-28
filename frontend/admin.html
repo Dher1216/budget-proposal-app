@@ -12,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/app/icons/favicon-32.png">
 <link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=20261028f">
+<link rel="stylesheet" href="css/app.css?v=20261028g">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -527,14 +527,26 @@
 
     <div class="panel">
       <h3 style="margin-top:0;">Free up space: delete attachments only</h3>
-      <p class="hint">Removes the uploaded files for a specific year to free up database storage, while keeping all proposal amounts, remarks, and everything else for that year fully intact.</p>
+      <p class="hint">Removes uploaded files to free up database storage, while keeping all proposal amounts, remarks, and everything else fully intact. Choose a year and, if you like, only the annual budget or only one supplemental.</p>
       <div class="filter-row">
         <div class="field">
           <label>Year</label>
           <input type="number" id="bk_attachYear" value="2027">
         </div>
         <div class="field">
-          <button class="btn secondary" id="bk_cleanupAttachments">Delete attachments for this year</button>
+          <label>Which budget</label>
+          <select id="bk_attachType">
+            <option value="">Everything for this year</option>
+            <option value="annual">Annual budget only</option>
+            <option value="supplemental">Supplemental only</option>
+          </select>
+        </div>
+        <div class="field" id="bk_attachSuppField" style="display:none;">
+          <label>Supplemental No.</label>
+          <input type="number" id="bk_attachSupp" min="1" placeholder="all" style="width:90px;">
+        </div>
+        <div class="field">
+          <button class="btn secondary" id="bk_cleanupAttachments">Delete these attachments</button>
         </div>
       </div>
       <div class="status-msg" id="bk_cleanupStatus"></div>
@@ -649,8 +661,8 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261028f"></script>
-<script src="js/pwa.js?v=20261028f"></script>
-<script src="js/admin.js?v=20261028f"></script>
+<script src="js/api.js?v=20261028g"></script>
+<script src="js/pwa.js?v=20261028g"></script>
+<script src="js/admin.js?v=20261028g"></script>
 </body>
 </html>

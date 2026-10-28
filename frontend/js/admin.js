@@ -1682,18 +1682,50 @@ document.getElementById("bk_downloadBtn").addEventListener("click", async () => 
   statusEl.textContent = "";
 });
 
+document.getElementById("bk_attachType").addEventListener("change", (e) => {
+  document.getElementById("bk_attachSuppField").style.display = e.target.value === "supplemental" ? "" : "none";
+});
+
 document.getElementById("bk_cleanupAttachments").addEventListener("click", async () => {
   const statusEl = document.getElementById("bk_cleanupStatus");
+  const btn = document.getElementById("bk_cleanupAttachments");
   const year = Number(document.getElementById("bk_attachYear").value);
-  if (!confirm(`Delete all attachment files for ${year}? Proposal amounts and remarks for that year are NOT affected — only the uploaded files. Make sure you've downloaded a backup first. This cannot be undone.`)) return;
+  const type = document.getElementById("bk_attachType").value;
+  const suppNo = Number(document.getElementById("bk_attachSupp").value) || null;
+  const body = { year };
+  let scope = `${year} (annual and all supplemental budgets)`;
+  if (type === "annual") { body.budget_type = "annual"; scope = `the ${year} annual budget`; }
+  if (type === "supplemental") {
+    body.budget_type = "supplemental";
+    if (suppNo) body.supplemental_number = suppNo;
+    scope = suppNo ? `${year} Supplemental No. ${suppNo}` : `all ${year} supplemental budgets`;
+  }
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span> Checking what would be deleted…';
+  statusEl.className = "status-msg loading";
   try {
-    const result = await apiPost("/api/admin/cleanup-attachments", { year });
+    // First ask how much there is, so the confirmation shows real numbers
+    const preview = await apiPost("/api/admin/cleanup-attachments", { ...body, preview: true });
+    const previewMb = (preview.bytes_freed / (1024 * 1024)).toFixed(2);
+    if (!preview.deleted_count) {
+      statusEl.textContent = `No attachments found for ${scope}.`;
+      statusEl.className = "status-msg";
+      return;
+    }
+    if (!confirm(`Delete ${preview.deleted_count} attachment file(s) (about ${previewMb} MB) for ${scope}? Proposal amounts and remarks are NOT affected — only the uploaded files. Make sure you've downloaded a backup first. This cannot be undone.`)) {
+      statusEl.textContent = "";
+      return;
+    }
+    statusEl.innerHTML = '<span class="spinner"></span> Deleting…';
+    const result = await apiPost("/api/admin/cleanup-attachments", body);
     const mb = (result.bytes_freed / (1024 * 1024)).toFixed(2);
-    statusEl.textContent = `Deleted ${result.deleted_count} attachment(s), freeing about ${mb} MB.`;
+    statusEl.textContent = `Deleted ${result.deleted_count} attachment(s) for ${scope}, freeing about ${mb} MB.`;
     statusEl.className = "status-msg ok";
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.className = "status-msg error";
+  } finally {
+    btn.disabled = false;
   }
 });
 

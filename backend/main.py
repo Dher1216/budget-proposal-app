@@ -1995,10 +1995,19 @@ def cleanup_attachments(payload: schemas.CleanupAttachmentsRequest, db: Session 
         .join(models.Proposal, models.ProposalLine.proposal_id == models.Proposal.id)
         .filter(models.Proposal.year == payload.year)
     )
+    if payload.budget_type:
+        if payload.budget_type not in ("annual", "supplemental"):
+            raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
+        id_q = id_q.filter(models.Proposal.budget_type == payload.budget_type)
+        if payload.budget_type == "supplemental" and payload.supplemental_number:
+            id_q = id_q.filter(models.Proposal.supplemental_number == payload.supplemental_number)
     count = id_q.count()
     bytes_freed = db.query(func.coalesce(func.sum(models.ProposalLineAttachment.file_size), 0)).filter(
         models.ProposalLineAttachment.id.in_(id_q)
     ).scalar() or 0
+
+    if payload.preview:
+        return {"deleted_count": count, "bytes_freed": bytes_freed, "preview": True}
 
     db.query(models.ProposalLineAttachment).filter(
         models.ProposalLineAttachment.id.in_(id_q)
