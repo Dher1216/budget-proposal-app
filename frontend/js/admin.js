@@ -946,6 +946,80 @@ async function mergeDupeGroup(gIdx) {
   }
 }
 
+// ------------------------------------------------ manual account merge --
+
+let MM_ACCOUNTS = [];
+const MM = { selected: new Set(), keep: null };
+
+async function loadManualMergeAccounts() {
+  try {
+    const { data } = await apiGet("/api/accounts");
+    MM_ACCOUNTS = data;
+    MM.selected = new Set([...MM.selected].filter(id => MM_ACCOUNTS.some(a => a.id === id)));
+    if (!MM.selected.has(MM.keep)) MM.keep = null;
+    renderManualMerge();
+  } catch (err) { console.error(err); }
+}
+
+function renderManualMerge() {
+  const q = document.getElementById("a_mmSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const matches = MM_ACCOUNTS.filter(a => MM.selected.has(a.id) ||
+    q.every(t => `${a.name} ${a.code}`.toLowerCase().includes(t))).slice(0, 80);
+  matches.sort((a, b) => (MM.selected.has(b.id) - MM.selected.has(a.id)) || a.name.localeCompare(b.name));
+  document.getElementById("a_mmList").innerHTML = matches.length ? matches.map(a => {
+    const sel = MM.selected.has(a.id);
+    return `<div style="display:flex; align-items:center; gap:10px; padding:3px 0; ${sel ? "background:#F3EDFB;" : ""}">
+      <input type="checkbox" ${sel ? "checked" : ""} onchange="toggleMmAccount(${a.id}, this.checked)">
+      <span style="flex:1;">${esc(a.name)} <span class="hint">— ${esc(CLASSIFICATION_LABELS[a.classification] || a.classification)}, code ${esc(a.code)}</span></span>
+      ${sel ? `<label style="font-weight:normal; white-space:nowrap;"><input type="radio" name="mm_keep" ${MM.keep === a.id ? "checked" : ""} onchange="MM.keep=${a.id}; renderManualMerge();"> keep this one</label>` : ""}
+    </div>`;
+  }).join("") : '<div class="hint">No accounts match.</div>';
+  const n = MM.selected.size;
+  document.getElementById("a_mmCount").textContent = n ? `${n} selected${MM.keep ? "" : " — choose which one to keep"}` : "";
+  document.getElementById("a_mmBtn").disabled = !(n >= 2 && MM.keep && MM.selected.has(MM.keep));
+}
+
+function toggleMmAccount(id, on) {
+  if (on) MM.selected.add(id); else { MM.selected.delete(id); if (MM.keep === id) MM.keep = null; }
+  renderManualMerge();
+}
+
+document.getElementById("a_mmSearch").addEventListener("input", renderManualMerge);
+
+document.getElementById("a_mmBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("a_mmStatus");
+  const keep = MM_ACCOUNTS.find(a => a.id === MM.keep);
+  const dupes = [...MM.selected].filter(id => id !== MM.keep);
+  const others = MM_ACCOUNTS.filter(a => dupes.includes(a.id));
+  const crossClass = others.some(a => a.classification !== keep.classification);
+  if (!confirm(`Merge ${dupes.length} account(s) into "${keep.name}"?\n\n` + others.map(a => "• " + a.name).join("\n") +
+      `\n\nAll proposal data on those moves onto "${keep.name}" and they are removed.` +
+      (crossClass ? "\n\nNote: some of them have a different classification — they will all take on the kept account's classification." : "") +
+      "\nThis can't be undone — download a backup first if unsure.")) return;
+  const btn = document.getElementById("a_mmBtn");
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span> Merging…';
+  statusEl.className = "status-msg loading";
+  try {
+    const result = await apiPost("/api/admin/accounts/merge", {
+      keep_account_id: keep.id, duplicate_account_ids: dupes, sum_conflicts: document.getElementById("a_mmSum").checked,
+    });
+    let msg = `Done — moved ${result.lines_moved} line(s), removed ${result.accounts_merged.length} account(s).`;
+    if (result.conflicts.length) msg += ` ${result.conflicts.length} office proposal(s) had amounts on both accounts and were left untouched (tick the "add them together" box and merge again to combine them).`;
+    statusEl.textContent = msg;
+    statusEl.className = result.conflicts.length ? "status-msg error" : "status-msg ok";
+    MM.selected = new Set(result.conflicts.length ? MM.selected : []);
+    if (!result.conflicts.length) MM.keep = null;
+    await loadManualMergeAccounts();
+    await loadAccounts();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "status-msg error";
+  }
+});
+loadManualMergeAccounts();
+
 // ----------------------------------------------------------------- users --
 
 document.getElementById("u_role").addEventListener("change", (e) => {

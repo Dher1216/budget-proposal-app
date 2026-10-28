@@ -746,6 +746,10 @@ def merge_accounts(payload: dict, db: Session = Depends(get_db), admin: models.U
     keep -- the rest of the merge still goes through."""
     keep_id = payload.get("keep_account_id")
     dup_ids = payload.get("duplicate_account_ids") or []
+    # Manual merges can opt in to ADDING the amounts together when both
+    # accounts already have data for the same office, instead of leaving
+    # that proposal as a conflict.
+    sum_conflicts = bool(payload.get("sum_conflicts"))
     keep = db.query(models.Account).get(keep_id) if keep_id else None
     if not keep:
         raise HTTPException(status_code=400, detail="keep_account_id must be a valid account.")
@@ -797,6 +801,7 @@ def merge_accounts(payload: dict, db: Session = Depends(get_db), admin: models.U
                 keep_line.remarks_adjusted = dl.remarks_adjusted
                 keep_line.approved_amount = dl.approved_amount
                 keep_line.remarks = dl.remarks
+                keep_line.spa_portion = dl.spa_portion
                 for s in list(dl.current_supplementals):
                     s.proposal_line_id = keep_line.id
                 for att in list(dl.attachments):
@@ -808,6 +813,37 @@ def merge_accounts(payload: dict, db: Session = Depends(get_db), admin: models.U
             if not has_real_data(dl):
                 # duplicate's line is blank -- nothing to keep, just drop it
                 db.delete(dl)
+                continue
+
+            if sum_conflicts:
+                # both have data and admin asked to combine: add the amounts
+                def add(a, b):
+                    return (a or 0) + (b or 0)
+                keep_line.prev_year_actual = add(keep_line.prev_year_actual, dl.prev_year_actual)
+                keep_line.current_annual = add(keep_line.current_annual, dl.current_annual)
+                keep_line.proposed_amount = add(keep_line.proposed_amount, dl.proposed_amount)
+                keep_line.spa_portion = add(keep_line.spa_portion, dl.spa_portion) if (keep_line.spa_portion or dl.spa_portion) else None
+                if keep_line.adjusted_proposal is not None or dl.adjusted_proposal is not None:
+                    keep_line.adjusted_proposal = add(keep_line.adjusted_proposal, dl.adjusted_proposal)
+                if keep_line.approved_amount is not None or dl.approved_amount is not None:
+                    keep_line.approved_amount = add(keep_line.approved_amount, dl.approved_amount)
+                for fld in ("remarks", "remarks_adjusted"):
+                    a_, b_ = (getattr(keep_line, fld) or "").strip(), (getattr(dl, fld) or "").strip()
+                    if b_ and b_ not in a_:
+                        setattr(keep_line, fld, (a_ + "; " + b_) if a_ else b_)
+                keep_supps = {s.supplemental_number: s for s in keep_line.current_supplementals}
+                for s in list(dl.current_supplementals):
+                    if s.supplemental_number in keep_supps:
+                        keep_supps[s.supplemental_number].amount = add(keep_supps[s.supplemental_number].amount, s.amount)
+                        db.delete(s)
+                    else:
+                        s.proposal_line_id = keep_line.id
+                for att in list(dl.attachments):
+                    att.proposal_line_id = keep_line.id
+                db.flush()
+                db.expire(dl)
+                db.delete(dl)
+                lines_moved += 1
                 continue
 
             # both have real data -- don't guess, leave both as-is and report it

@@ -12,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/app/icons/favicon-32.png">
 <link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=20261028g">
+<link rel="stylesheet" href="css/app.css?v=20261028h">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -259,6 +259,25 @@
       <button class="btn secondary" id="a_findDupesBtn">Scan for duplicates</button>
       <div class="status-msg" id="a_dupesStatus"></div>
       <div id="a_dupesGroups" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">Merge accounts manually</h3>
+      <p class="hint">
+        For accounts the scan above didn't catch. Search and tick every spelling of the same account,
+        choose which one to <strong>keep</strong>, and merge. Everything filed under the others moves onto the one you keep.
+      </p>
+      <input type="search" id="a_mmSearch" placeholder="Search account name or code…" autocomplete="off" style="max-width:420px;">
+      <div id="a_mmList" style="max-height:260px; overflow:auto; margin-top:8px; border:1px solid var(--line); border-radius:6px; padding:6px 10px;"></div>
+      <label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-weight:normal;">
+        <input type="checkbox" id="a_mmSum">
+        If an office has amounts on both accounts, add them together (otherwise that office is left for you to check)
+      </label>
+      <div style="margin-top:8px;">
+        <button class="btn secondary" id="a_mmBtn" disabled>Merge selected accounts</button>
+        <span class="hint" id="a_mmCount" style="margin-left:8px;"></span>
+      </div>
+      <div class="status-msg" id="a_mmStatus"></div>
     </div>
 
     <div class="panel">
@@ -661,8 +680,8 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261028g"></script>
-<script src="js/pwa.js?v=20261028g"></script>
-<script src="js/admin.js?v=20261028g"></script>
+<script src="js/api.js?v=20261028h"></script>
+<script src="js/pwa.js?v=20261028h"></script>
+<script src="js/admin.js?v=20261028h"></script>
 </body>
 </html>
