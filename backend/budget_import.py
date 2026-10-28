@@ -193,3 +193,250 @@ def suggest_office_match(office_name_in_file: str, existing_offices: list) -> Op
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+# =====================================================================
+# Supplemental budget workbook (LBP Form 9 + LBP Form 8)
+# =====================================================================
+# A supplemental budget file has no per-office sheets. Instead:
+#   * "LBP Form 9" lists every office as a heading row with its account
+#     lines underneath, then (after a "PROGRAMS/PROJECTS TO BE FUNDED UNDER
+#     THE 20% NTA DEVELOPMENT PROGRAM" heading) the 20% Development Fund
+#     project breakdown, then a single 5% LDRRMF line, then (optionally)
+#     the National Wealth utilisation section.
+#   * "LBP Form 8" is the Statement of Funding Sources.
+# Only the first "Amount" column is read; anything to its right is ignored.
+
+LDRRMF_ACCOUNT_NAME = "5% Local Disaster Risk Reduction and Management Fund (LDRRMF)"
+DEV_FUND_BALANCE_CATEGORY = "Reversion - 20% Development Fund"   # unexpended 20% DF carried into a supplemental
+NON_RECEIPT_CATEGORIES = ("Beginning Cash Balance", "Savings", "Realignment", "Reversion", DEV_FUND_BALANCE_CATEGORY)
+NTA_CATEGORY = "External Sources - IRA / National Tax Allocation"
+
+_GENERIC_OBJECTS = {"MOOE", "PS", "CAPITAL OUTLAY", "CO", "FE", ""}
+
+
+def _to_float(v) -> float:
+    if isinstance(v, bool):
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.replace(",", "").strip())
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def classification_from_code(code: str) -> str:
+    """Best guess at an account's classification from its object code."""
+    c = str(code).strip()
+    if c.startswith("501"):
+        return "PS"
+    if c.startswith("503"):
+        return "FE"
+    if c.startswith("107") or c.startswith("106") or c.startswith("108"):
+        return "CO"
+    return "MOOE"
+
+
+def _find_sheet(wb, needle: str):
+    for name in wb.sheetnames:
+        if needle in re.sub(r"\s+", " ", name.lower()):
+            return wb[name]
+    return None
+
+
+def _find_header(ws, max_scan=40):
+    """Locate the column header row of Form 9; returns dict of column
+    indexes (0-based) or None."""
+    for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=max_scan, values_only=True), 1):
+        cells = [str(c).strip().lower() if isinstance(c, str) else "" for c in row]
+        if any("account code" in c for c in cells):
+            cols = {"row": r_idx}
+            for i, c in enumerate(cells):
+                if "account code" in c and "code" not in cols:
+                    cols["code"] = i
+                elif c.startswith("object of expenditure") and "object" not in cols:
+                    cols["object"] = i
+                elif c.startswith("particulars") and "purpose" not in cols:
+                    cols["purpose"] = i
+                elif c == "amount" and "amount" not in cols:
+                    cols["amount"] = i
+            if "code" in cols and "amount" in cols:
+                cols.setdefault("object", cols["code"] - 1)
+                cols.setdefault("purpose", 1)
+                return cols
+    return None
+
+
+def _parse_form9(ws):
+    cols = _find_header(ws)
+    if not cols:
+        raise ValueError("Could not find the column headings (Account Code / Amount) on the LBP Form 9 sheet.")
+    code_c, amt_c, obj_c, pur_c = cols["code"], cols["amount"], cols["object"], cols["purpose"]
+
+    zone = "office"
+    cur_office = None
+    ldrrmf_amount = 0.0
+    control_total = None
+    buckets = {}      # office name -> {"lines": {code: line}, ...}
+    order = []
+    dev20 = {}        # code -> line   (project breakdown of the 20% Development Fund)
+
+    def add_line(target: dict, code, amount, obj, purpose):
+        ln = target.setdefault(code, {"code": code, "amount": 0.0, "object_hint": "", "particulars": []})
+        ln["amount"] += amount
+        if obj and not ln["object_hint"]:
+            ln["object_hint"] = obj
+        if purpose and len(ln["particulars"]) < 6:
+            ln["particulars"].append(purpose)
+
+    for row in ws.iter_rows(min_row=cols["row"] + 1, values_only=True):
+        c0 = row[0].strip() if len(row) > 0 and isinstance(row[0], str) else ""
+        code_raw = row[code_c] if len(row) > code_c else None
+        code = str(int(code_raw)) if isinstance(code_raw, (int, float)) and not isinstance(code_raw, bool) \
+            else (str(code_raw).strip() if code_raw is not None else "")
+        has_code = code.isdigit()
+        amount = _to_float(row[amt_c]) if len(row) > amt_c else 0.0
+        up = c0.upper()
+
+        if up.startswith("TOTAL APPROPRIATION"):
+            control_total = amount
+            break
+        if up.startswith("UNAPPROPRIATED"):
+            continue
+        if c0 and not has_code:
+            if "20%" in up and "NTA" in up and up.startswith("PROGRAMS"):
+                zone = "dev20"; continue
+            if up.startswith("5%") and "DISASTER" in up:
+                ldrrmf_amount += amount
+                zone = "after5"; continue
+            if up.startswith("PROGRAMS") and "NATIONAL WEALTH" in up:
+                zone = "office"; cur_office = None; continue
+            if zone == "office":
+                cur_office = c0
+                if c0 not in buckets:
+                    buckets[c0] = {}
+                    order.append(c0)
+            continue   # sector / municipality / project-group headings in the 20% zone
+        if has_code and amount:
+            obj = row[obj_c].strip() if len(row) > obj_c and isinstance(row[obj_c], str) else ""
+            purpose = row[pur_c].strip() if len(row) > pur_c and isinstance(row[pur_c], str) else ""
+            if zone == "dev20":
+                add_line(dev20, code, amount, obj, purpose)
+            elif zone == "office" and cur_office:
+                add_line(buckets[cur_office], code, amount, obj, purpose)
+    return buckets, order, dev20, ldrrmf_amount, control_total
+
+
+def _parse_form8(ws):
+    """Grouped funding sources: main headings (1.0 New Revenue Sources, 3.0
+    Savings, 4.0 Realignment, 5.0 Reversion ...) become the category. Only
+    the top-level item lines are taken; the indented realignment/project
+    detail underneath them is a breakdown of those items, not extra money."""
+    heading_re = re.compile(r"^\d+(\.\d+)?\s+(.+?)\s*$")
+    start = None
+    for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=40, values_only=True), 1):
+        if isinstance(row[0], str) and row[0].strip().lower().startswith("particulars"):
+            start = r_idx
+            break
+    if start is None:
+        raise ValueError("Could not find the 'Particulars' heading on the LBP Form 8 sheet.")
+    amt_c = 4
+    for row in ws.iter_rows(min_row=start, max_row=start, values_only=True):
+        for i, c in enumerate(row):
+            if isinstance(c, str) and c.strip().lower() == "amount":
+                amt_c = i
+
+    group = None
+    items = []
+    total_income = None
+    for row in ws.iter_rows(min_row=start + 1, values_only=True):
+        c0 = row[0].strip() if isinstance(row[0], str) else ""
+        if c0.upper().startswith("TOTAL ESTIMATED INCOME"):
+            total_income = _to_float(row[amt_c]); break
+        m = heading_re.match(c0) if c0 else None
+        if m and not c0.startswith("("):
+            title = m.group(2).strip().title()
+            group = title
+            continue
+        label = row[1].strip() if len(row) > 1 and isinstance(row[1], str) else ""
+        amount = _to_float(row[amt_c]) if len(row) > amt_c else 0.0
+        if group and label and label.lower() != "xxx" and amount:
+            category = group
+            if re.search(r"20\s*%\s*development\s*fund", label, re.I):
+                category = DEV_FUND_BALANCE_CATEGORY
+            elif group.lower().startswith("new revenue") and re.search(r"\bNTA\b|national tax|\bIRA\b", label, re.I):
+                category = NTA_CATEGORY
+            items.append({"category": category, "particulars": label, "amount": round(amount, 2)})
+    return items, total_income
+
+
+def parse_supplemental_workbook(file_bytes) -> dict:
+    wb = openpyxl.load_workbook(file_bytes, data_only=True)
+    ws9 = _find_sheet(wb, "form 9")
+    if ws9 is None:
+        raise ValueError("No 'LBP Form 9' sheet was found in this workbook.")
+    buckets, order, dev20, ldrrmf_amount, control_total = _parse_form9(ws9)
+
+    ws8 = _find_sheet(wb, "form 8")
+    fund_sources, form8_total = ([], None)
+    if ws8 is not None:
+        fund_sources, form8_total = _parse_form8(ws8)
+
+    # 20% Development Fund project breakdown belongs to PPDO; the 5% LDRRMF
+    # line to PDRRMO. They're merged into that office's own entry when the
+    # file already lists it; otherwise an entry is created for it.
+    def find_or_add(token, default_name):
+        for name in order:
+            if token in name.upper():
+                return name
+        buckets[default_name] = {}
+        order.append(default_name)
+        return default_name
+
+    ppdo_name = find_or_add("PLANNING", "OFFICE OF THE PROVINCIAL PLANNING & DEVELOPMENT COORDINATOR") if dev20 else None
+    pdrrmo_name = find_or_add("DISASTER", "OFFICE OF THE PROVINCIAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE") if ldrrmf_amount else None
+
+    dev20_total = round(sum(l["amount"] for l in dev20.values()), 2)
+    if ppdo_name:
+        for code, ln in dev20.items():
+            tgt = buckets[ppdo_name].setdefault(code, {"code": code, "amount": 0.0, "object_hint": ln["object_hint"], "particulars": []})
+            tgt["amount"] += ln["amount"]
+            tgt["particulars"] = (tgt["particulars"] + ln["particulars"])[:6]
+    if pdrrmo_name:
+        buckets[pdrrmo_name]["LDRRMF"] = {
+            "code": "LDRRMF", "amount": ldrrmf_amount, "object_hint": LDRRMF_ACCOUNT_NAME, "particulars": ["5% LDRRMF"],
+        }
+
+    offices = []
+    grand = 0.0
+    for name in order:
+        lines = [dict(l, amount=round(l["amount"], 2)) for l in buckets[name].values() if l["amount"]]
+        if not lines:
+            continue
+        total = round(sum(l["amount"] for l in lines), 2)
+        grand += total
+        offices.append({
+            "office_name_in_file": name,
+            "office_code": None,
+            "office_sector": None,
+            "line_count": len(lines),
+            "total_amount": total,
+            "dev20_included": dev20_total if name == ppdo_name else 0,
+            "ldrrmf_included": round(ldrrmf_amount, 2) if name == pdrrmo_name else 0,
+            "lines": lines,
+        })
+    return {
+        "offices": offices,
+        "grand_total": round(grand, 2),
+        "control_total": control_total,
+        "control_match": control_total is not None and abs(grand - control_total) < 1.0,
+        "dev20_total": dev20_total,
+        "ldrrmf_total": round(ldrrmf_amount, 2),
+        "fund_sources": fund_sources,
+        "fund_total": round(sum(f["amount"] for f in fund_sources), 2),
+        "form8_total": form8_total,
+        "form8_match": form8_total is not None and abs(sum(f["amount"] for f in fund_sources) - form8_total) < 1.0,
+    }

@@ -1218,7 +1218,10 @@ def _fund_source_totals_by_category(db: Session, year: int, budget_type: str, su
 
 def _compute_dev_fund_20pct(by_category: dict) -> float:
     nta = by_category.get("External Sources - IRA / National Tax Allocation", 0.0)
-    return round(nta * 0.20, 2)
+    # A supplemental also carries the unexpended 20% Development Fund balance
+    # (Form 8 reversion) in full -- it is already 20% money, so not x20%.
+    carried = by_category.get(budget_import.DEV_FUND_BALANCE_CATEGORY, 0.0)
+    return round(nta * 0.20 + carried, 2)
 
 
 def _compute_ldrrmf_5pct(by_category: dict) -> float:
@@ -1229,7 +1232,10 @@ def _compute_ldrrmf_5pct(by_category: dict) -> float:
     # (80%)" line that lives under Beginning Cash Balance, which is a
     # restricted account used only for electricity and is excluded here
     # because it's a beginning-balance item, not because of its name.
-    base = sum(amount for category, amount in by_category.items() if category != BEGINNING_CASH_CAT)
+    # Supplemental Form 8 sources that are not new receipts (savings carried
+    # over, realigned and reverted appropriations) are excluded the same way.
+    base = sum(amount for category, amount in by_category.items()
+               if category not in budget_import.NON_RECEIPT_CATEGORIES)
     return round(base * 0.05, 2)
 
 
@@ -1902,6 +1908,78 @@ def purge_year(payload: schemas.PurgeYearRequest, db: Session = Depends(get_db),
 # year. Two-step (preview, then commit) so nothing is written to the
 # database until the admin has reviewed the office matches and confirmed.
 
+
+def _supplemental_preview(raw: bytes, year: int, db: Session):
+    """Preview for a supplemental workbook (LBP Form 9 office lines + LBP
+    Form 8 funding sources). Writes nothing."""
+    try:
+        parsed = budget_import.parse_supplemental_workbook(io.BytesIO(raw))
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Could not read that supplemental workbook: {ex}")
+    if not parsed["offices"]:
+        raise HTTPException(status_code=400, detail="No office lines were found on the LBP Form 9 sheet.")
+
+    existing_offices = [(o.id, o.name) for o in db.query(models.Office).all()]
+    by_code, by_norm = {}, {}
+    for a in db.query(models.Account).order_by(models.Account.id).all():
+        by_code.setdefault(a.code, []).append(a)
+        by_norm.setdefault(_normalize_account_name(a.name), a)
+
+    unmatched = {}
+    for office in parsed["offices"]:
+        office["suggested_office_id"] = budget_import.suggest_office_match(
+            office["office_name_in_file"], existing_offices)
+        if office["suggested_office_id"] is None:
+            # file names are often longer/abbreviated differently -- try a keyword match
+            up = office["office_name_in_file"].upper()
+            for token in ("PLANNING", "DISASTER"):
+                if token in up:
+                    hits = [oid for oid, nm in existing_offices if token in nm.upper()]
+                    if len(hits) == 1:
+                        office["suggested_office_id"] = hits[0]
+        new_count = 0
+        for line in office["lines"]:
+            acct = None
+            if line["code"] == "LDRRMF":
+                acct = by_norm.get(_normalize_account_name(budget_import.LDRRMF_ACCOUNT_NAME))
+                line["new_account_name"] = budget_import.LDRRMF_ACCOUNT_NAME
+                line["new_classification"] = "SPA"
+                line["new_code"] = ""
+            else:
+                cands = by_code.get(line["code"])
+                if cands:
+                    acct = cands[0]
+                    line["code_ambiguous"] = len(cands) > 1
+                else:
+                    hint = line.get("object_hint") or ""
+                    name = hint if hint.strip().upper() not in budget_import._GENERIC_OBJECTS else \
+                        (line["particulars"][0] if line["particulars"] else line["code"])
+                    acct = by_norm.get(_normalize_account_name(name))
+                    line["new_account_name"] = name
+                    line["new_classification"] = budget_import.classification_from_code(line["code"])
+                    line["new_code"] = line["code"]
+            line["matched_account_id"] = acct.id if acct else None
+            line["matched_account_name"] = acct.name if acct else None
+            if acct is None:
+                new_count += 1
+                key = line["code"]
+                unmatched.setdefault(key, {"code": line["code"], "name": line.get("new_account_name"),
+                                           "classification": line.get("new_classification")})
+        office["new_account_count"] = new_count
+
+    by_category = {}
+    for fs in parsed["fund_sources"]:
+        by_category[fs["category"]] = by_category.get(fs["category"], 0.0) + fs["amount"]
+    parsed["system_dev20"] = _compute_dev_fund_20pct(by_category)
+    parsed["system_ldrrmf"] = _compute_ldrrmf_5pct(by_category)
+    parsed["unmatched_accounts"] = list(unmatched.values())
+    parsed["year"] = year
+    parsed["budget_type"] = "supplemental"
+    parsed["existing_offices"] = [{"id": oid, "name": name} for oid, name in existing_offices]
+    parsed["grand_total_proposed"] = parsed["grand_total"]
+    parsed["skipped_sheets"] = []
+    return parsed
+
 @app.post("/api/admin/budget-import/preview")
 async def budget_import_preview(
     file: UploadFile = File(...),
@@ -1914,6 +1992,8 @@ async def budget_import_preview(
         raise HTTPException(status_code=400, detail="budget_type must be 'annual' or 'supplemental'")
 
     raw = await file.read()
+    if budget_type == "supplemental":
+        return _supplemental_preview(raw, year, db)
     try:
         parsed = budget_import.parse_workbook(io.BytesIO(raw))
     except Exception as ex:
@@ -1977,6 +2057,10 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
     budget_type = payload.get("budget_type", "annual")
     offices_in = payload.get("offices") or []
     source_label = payload.get("source_label") or "budget import"
+    fields = [f for f in (payload.get("fields") or ["proposed"]) if f in ("proposed", "adjusted", "approved")]
+    if not fields:
+        raise HTTPException(status_code=400, detail="Choose at least one of Proposed, Adjusted or Approved.")
+    fund_sources_in = payload.get("fund_sources") or []
 
     if not year or not isinstance(year, int):
         raise HTTPException(status_code=400, detail="A valid integer year is required.")
@@ -2030,14 +2114,25 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
                                            office_entry.get("supplemental_number"))
 
         for line in office_entry.get("lines") or []:
-            name = (line.get("name") or "").strip()
-            if not name:
-                continue
-            classification = line.get("classification")
-            code = str(line.get("code") or "").strip()
+            if budget_type == "supplemental":
+                name = (line.get("matched_account_name") or line.get("new_account_name") or "").strip()
+                classification = line.get("new_classification")
+                code = str(line.get("new_code") or "").strip()
+                if not name and not line.get("matched_account_id"):
+                    continue
+            else:
+                name = (line.get("name") or "").strip()
+                if not name:
+                    continue
+                classification = line.get("classification")
+                code = str(line.get("code") or "").strip()
 
             norm_name = _normalize_account_name(name)
-            account = find_duplicate_account_name(db, name) or accounts_by_norm.get(norm_name)
+            account = None
+            if budget_type == "supplemental" and line.get("matched_account_id"):
+                account = db.query(models.Account).get(line["matched_account_id"])
+            if account is None:
+                account = find_duplicate_account_name(db, name) or accounts_by_norm.get(norm_name)
             if not account:
                 if classification not in ("PS", "MOOE", "CO", "FE", "SPA"):
                     continue  # can't create an account without a known classification
@@ -2063,17 +2158,56 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
                 db.add(pl)
                 db.flush()
 
-            pl.prev_year_actual = line.get("prev_year_actual") or 0
-            pl.current_annual = line.get("current_annual") or 0
-            pl.proposed_amount = line.get("proposed_amount") or 0
+            if budget_type == "supplemental":
+                amount = line.get("amount") or 0
+            else:
+                amount = line.get("proposed_amount") or 0
+                if "proposed" in fields:
+                    pl.prev_year_actual = line.get("prev_year_actual") or 0
+                    pl.current_annual = line.get("current_annual") or 0
+            if "proposed" in fields:
+                pl.proposed_amount = amount
+            if "adjusted" in fields:
+                pl.adjusted_proposal = amount
+            if "approved" in fields:
+                pl.approved_amount = amount
             lines_written += 1
 
         log_action(
             db, proposal, admin, "budget_imported",
             detail=f"Imported {len(office_entry.get('lines') or [])} line(s) from {source_label} "
-                   f"({year} {budget_type})."
+                   f"({year} {budget_type}) into: {', '.join(fields)}."
         )
         offices_updated += 1
+        db.commit()
+
+    # Funding sources (LBP Form 8) -- belong only to THIS supplemental cycle;
+    # the annual funding sources are never touched.
+    fund_sources_written = 0
+    if budget_type == "supplemental" and fund_sources_in:
+        supp_no = None
+        for oe in offices_in:
+            if oe.get("supplemental_number"):
+                supp_no = oe["supplemental_number"]
+                break
+        supp_no = supp_no or payload.get("supplemental_number") or 1
+        for fs in fund_sources_in:
+            particulars = (fs.get("particulars") or "").strip()
+            category = (fs.get("category") or "").strip()
+            if not particulars or not category:
+                continue
+            row = db.query(models.FundSource).filter(
+                models.FundSource.year == year, models.FundSource.budget_type == "supplemental",
+                models.FundSource.supplemental_number == supp_no,
+                models.FundSource.category == category, models.FundSource.particulars == particulars,
+            ).first()
+            if row:
+                row.amount = float(fs.get("amount") or 0)
+            else:
+                db.add(models.FundSource(year=year, budget_type="supplemental", supplemental_number=supp_no,
+                                         category=category, particulars=particulars,
+                                         amount=float(fs.get("amount") or 0)))
+            fund_sources_written += 1
         db.commit()
 
     return {
@@ -2081,6 +2215,7 @@ def budget_import_commit(payload: dict, db: Session = Depends(get_db),
         "offices_created": offices_created,
         "lines_written": lines_written,
         "accounts_created": accounts_created,
+        "fund_sources_written": fund_sources_written,
     }
 
 

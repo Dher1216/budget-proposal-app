@@ -12,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/app/icons/favicon-32.png">
 <link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=20261028a">
+<link rel="stylesheet" href="css/app.css?v=20261028b">
 </head>
 <body>
   <div class="offline-banner" id="offlineBanner">You're offline — showing the last data saved to this device. Saving and approving require a connection.</div>
@@ -593,9 +593,23 @@
           <input type="number" id="imp_supNumber" value="1" min="1">
         </div>
         <div class="field">
+          <label>This file is for (tick one or more)</label>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:6px;">
+            <label style="font-weight:normal;"><input type="checkbox" class="imp-field" value="proposed" checked> Proposed</label>
+            <label style="font-weight:normal;"><input type="checkbox" class="imp-field" value="adjusted"> Adjusted</label>
+            <label style="font-weight:normal;"><input type="checkbox" class="imp-field" value="approved"> Approved</label>
+          </div>
+        </div>
+        <div class="field">
           <button class="btn" id="imp_previewBtn">Preview Import</button>
         </div>
       </div>
+      <p class="hint" id="imp_suppHelp" style="display:none;">
+        Supplemental files are read from the <strong>LBP Form 9</strong> sheet (office lines, amount column only)
+        and <strong>LBP Form 8</strong> (funding sources, saved for this supplemental only &mdash; annual funding
+        sources are never touched). The 20% Development Fund project breakdown goes to PPDO and the 5% LDRRMF
+        line goes to PDRRMO.
+      </p>
       <div class="status-msg" id="imp_previewStatus"></div>
     </div>
 
@@ -603,11 +617,12 @@
       <h3 style="margin-top:0;">Review matches</h3>
       <p class="hint" id="imp_summaryLine"></p>
       <div id="imp_skippedNote" class="hint" style="display:none;"></div>
+      <div id="imp_suppInfo" style="display:none;"></div>
       <div class="table-wrap">
         <table class="data-table" id="imp_officeTable">
           <thead>
             <tr>
-              <th>Sheet</th>
+              <th id="imp_th_sheet">Sheet</th>
               <th>Office name (from file)</th>
               <th>Matches existing office</th>
               <th>Lines</th>
@@ -627,8 +642,8 @@
     </div>
   </div>
 
-<script src="js/api.js?v=20261028a"></script>
-<script src="js/pwa.js?v=20261028a"></script>
-<script src="js/admin.js?v=20261028a"></script>
+<script src="js/api.js?v=20261028b"></script>
+<script src="js/pwa.js?v=20261028b"></script>
+<script src="js/admin.js?v=20261028b"></script>
 </body>
 </html>

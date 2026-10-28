@@ -1190,7 +1190,8 @@ function recomputeLiveSpaPreview() {
   });
 
   const nta = byCategory["External Sources - IRA / National Tax Allocation"] || 0;
-  const devFund = Math.round(nta * 0.20 * 100) / 100;
+  // plus the unexpended 20% DF balance carried into a supplemental (already 20% money)
+  const devFund = Math.round((nta * 0.20 + (byCategory["Reversion - 20% Development Fund"] || 0)) * 100) / 100;
 
   // 5% of total receipts, excluding only the "Beginning Cash Balance"
   // category -- this correctly INCLUDES "External Sources - Share from
@@ -1199,7 +1200,9 @@ function recomputeLiveSpaPreview() {
   // category, not by name.
   let ldrrmfBase = 0;
   Object.keys(byCategory).forEach(cat => {
-    if (cat !== "Beginning Cash Balance") ldrrmfBase += byCategory[cat];
+    // same exclusions as the server (_compute_ldrrmf_5pct): beginning cash and
+    // the supplemental non-receipt sources (savings / realignment / reversion)
+    if (!["Beginning Cash Balance", "Savings", "Realignment", "Reversion", "Reversion - 20% Development Fund"].includes(cat)) ldrrmfBase += byCategory[cat];
   });
   const ldrrmf = Math.round(ldrrmfBase * 0.05 * 100) / 100;
 
@@ -1765,8 +1768,14 @@ document.getElementById("bk_purgeBtn").addEventListener("click", async () => {
 let IMPORT_PREVIEW = null;  // the full preview response, held in memory between preview and commit
 
 document.getElementById("imp_budgetType").addEventListener("change", (e) => {
-  document.getElementById("imp_supField").style.display = e.target.value === "supplemental" ? "" : "none";
+  const supp = e.target.value === "supplemental";
+  document.getElementById("imp_supField").style.display = supp ? "" : "none";
+  document.getElementById("imp_suppHelp").style.display = supp ? "" : "none";
 });
+
+function selectedImportFields() {
+  return Array.from(document.querySelectorAll(".imp-field:checked")).map(c => c.value);
+}
 
 document.getElementById("imp_previewBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("imp_previewStatus");
@@ -1796,7 +1805,9 @@ document.getElementById("imp_previewBtn").addEventListener("click", async () => 
     }
     IMPORT_PREVIEW = await res.json();
     renderImportPreview();
-    statusEl.textContent = `Found ${IMPORT_PREVIEW.offices.length} office sheet(s). Review the matches below, then click Confirm & Import.`;
+    statusEl.textContent = IMPORT_PREVIEW.budget_type === "supplemental"
+      ? `Found ${IMPORT_PREVIEW.offices.length} office(s) on LBP Form 9. Review the matches below, then click Confirm & Import.`
+      : `Found ${IMPORT_PREVIEW.offices.length} office sheet(s). Review the matches below, then click Confirm & Import.`;
     statusEl.className = "status-msg ok";
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1804,12 +1815,48 @@ document.getElementById("imp_previewBtn").addEventListener("click", async () => 
   }
 });
 
+function renderSupplementalInfo(p) {
+  const el = document.getElementById("imp_suppInfo");
+  el.style.display = "";
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const ok = (good, text) => `<span style="color:var(--${good ? "success" : "danger"}, ${good ? "#155724" : "#721c24"});">${text}</span>`;
+  const byGroup = {};
+  p.fund_sources.forEach(f => { (byGroup[f.category] = byGroup[f.category] || []).push(f); });
+  const fundRows = Object.keys(byGroup).map(cat =>
+    byGroup[cat].map((f, i) => `<tr><td>${i === 0 ? esc(cat) : ""}</td><td>${esc(f.particulars)}</td><td style="text-align:right;">${money(f.amount)}</td></tr>`).join("")
+  ).join("");
+  const diff20 = Math.round((p.dev20_total - p.system_dev20) * 100) / 100;
+  const diff5 = Math.round((p.ldrrmf_total - p.system_ldrrmf) * 100) / 100;
+  el.innerHTML = `
+    <div class="hint" style="margin-bottom:8px;">
+      Form 9 office lines total <strong>${money(p.grand_total)}</strong> ${p.control_match
+        ? ok(true, "&mdash; matches the file's TOTAL APPROPRIATION " + money(p.control_total))
+        : ok(false, "&mdash; does NOT match the file's TOTAL APPROPRIATION " + money(p.control_total))}.<br>
+      20% Development Fund project breakdown (to PPDO): <strong>${money(p.dev20_total)}</strong>;
+      the system's automatic 20% from these funding sources would be ${money(p.system_dev20)}
+      ${Math.abs(diff20) < 1 ? ok(true, "(same)") : ok(false, "(difference " + money(diff20) + " &mdash; you can type your own 20% figure under Fund Sources &amp; SPA)")}.<br>
+      5% LDRRMF (to PDRRMO): <strong>${money(p.ldrrmf_total)}</strong>; automatic 5% would be ${money(p.system_ldrrmf)}
+      ${Math.abs(diff5) < 1 ? ok(true, "(same)") : ok(false, "(difference " + money(diff5) + ")")}.
+    </div>
+    ${p.unmatched_accounts.length ? `<div class="hint" style="margin-bottom:8px;"><strong>${p.unmatched_accounts.length} account code(s) are not in your chart of accounts yet</strong> and will be added when you import: ${
+      p.unmatched_accounts.map(a => `${esc(a.code)} ${esc(a.name)} (${esc(a.classification)})`).join("; ")}.</div>` : ""}
+    <details style="margin-bottom:10px;"><summary><strong>Funding sources (LBP Form 8)</strong> &mdash; ${p.fund_sources.length} item(s), total ${money(p.fund_total)}
+      ${p.form8_match ? ok(true, "(matches the file's TOTAL ESTIMATED INCOME)") : ok(false, "(does NOT match the file's TOTAL ESTIMATED INCOME " + money(p.form8_total) + ")")}</summary>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Group</th><th>Particulars</th><th>Amount</th></tr></thead><tbody>${fundRows}</tbody></table></div>
+      <div class="hint">Saved to this supplemental only. Existing items with the same group and name are updated; nothing else is removed.</div>
+    </details>`;
+}
+
 function renderImportPreview() {
   const p = IMPORT_PREVIEW;
   document.getElementById("imp_resultsPanel").style.display = "";
+  const isSupp = p.budget_type === "supplemental";
+  document.getElementById("imp_th_sheet").textContent = isSupp ? "Source" : "Sheet";
+  if (isSupp) renderSupplementalInfo(p);
+  else document.getElementById("imp_suppInfo").style.display = "none";
 
   const unmatchedCount = p.offices.filter(o => o.suggested_office_id == null).length;
-  const mismatchCount = p.offices.filter(o => o.control_match === false).length;
+  const mismatchCount = isSupp ? 0 : p.offices.filter(o => o.control_match === false).length;
   document.getElementById("imp_summaryLine").innerHTML =
     `${p.offices.length} office sheet(s) found for <strong>${p.year} ${p.budget_type}</strong> — ` +
     `grand total proposed: <strong>${money(p.grand_total_proposed)}</strong>. ` +
@@ -1829,12 +1876,15 @@ function renderImportPreview() {
     .map(o => `<option value="${o.id}">${o.name}</option>`).join("");
 
   document.getElementById("imp_officeRows").innerHTML = p.offices.map((o, idx) => {
-    const controlBadge = o.control_match
-      ? `<span class="badge" style="background:#d4edda;color:#155724;">matches ${money(o.control_total)}</span>`
-      : `<span class="badge" style="background:#f8d7da;color:#721c24;">file total ${money(o.control_total)} vs computed ${money(o.total_proposed)}</span>`;
+    const controlBadge = isSupp
+      ? (o.dev20_included ? `<span class="badge" style="background:#e2e3e5;">incl. 20% DF projects ${money(o.dev20_included)}</span>`
+        : o.ldrrmf_included ? `<span class="badge" style="background:#e2e3e5;">incl. 5% LDRRMF ${money(o.ldrrmf_included)}</span>` : "")
+      : (o.control_match
+        ? `<span class="badge" style="background:#d4edda;color:#155724;">matches ${money(o.control_total)}</span>`
+        : `<span class="badge" style="background:#f8d7da;color:#721c24;">file total ${money(o.control_total)} vs computed ${money(o.total_proposed)}</span>`);
     return `
       <tr>
-        <td>${o.sheet}</td>
+        <td>${isSupp ? "LBP Form 9" : o.sheet}</td>
         <td>${o.office_name_in_file}<div class="hint">${o.office_code || ""} ${o.office_sector || ""}</div></td>
         <td>
           <select data-idx="${idx}" class="imp-office-select">
@@ -1845,7 +1895,7 @@ function renderImportPreview() {
         </td>
         <td>${o.line_count}</td>
         <td>${o.new_account_count}</td>
-        <td>${money(o.total_proposed)}</td>
+        <td>${money(isSupp ? o.total_amount : o.total_proposed)}</td>
         <td>${controlBadge}</td>
       </tr>`;
   }).join("");
@@ -1890,8 +1940,20 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
     statusEl.className = "status-msg error";
     return;
   }
+  const fields = selectedImportFields();
+  if (!fields.length) {
+    statusEl.textContent = "Tick at least one of Proposed, Adjusted or Approved.";
+    statusEl.className = "status-msg error";
+    return;
+  }
+  const fieldNames = { proposed: "Proposed", adjusted: "Adjusted Proposal", approved: "Approved" };
+  const fieldText = fields.map(f => fieldNames[f]).join(", ");
+  const isSupp = IMPORT_PREVIEW.budget_type === "supplemental";
   const createNote = newOfficeCount ? ` This will also create ${newOfficeCount} new office record(s) (name only — you'll still need to add a user account for each under the Users tab so that office can log in).` : "";
-  if (!confirm(`Import ${offices.length} office(s) into the ${IMPORT_PREVIEW.year} ${IMPORT_PREVIEW.budget_type} budget?${createNote} This writes the Previous Year Actual, Current Annual, and Proposed Amount for every matched line. Existing values for those fields will be overwritten; admin fields (Adjusted Proposal, Approved, remarks) are left untouched.`)) {
+  if (!confirm(`Import ${offices.length} office(s) into the ${IMPORT_PREVIEW.year} ${IMPORT_PREVIEW.budget_type} budget?${createNote} This writes the amounts into: ${fieldText}` +
+    (isSupp
+      ? ` for every line, and saves the ${IMPORT_PREVIEW.fund_sources.length} funding source item(s) for this supplemental only. Existing values in those fields will be overwritten; nothing else (including the annual budget and annual funding sources) is touched.`
+      : `${fields.includes("proposed") ? " (plus Previous Year Actual and Current Annual)" : ""} for every matched line. Existing values in those fields will be overwritten; the other fields and remarks are left untouched.`) + `${fields.includes("approved") ? " Approved amounts are written directly; the approval status is not changed." : ""}`)) {
     return;
   }
 
@@ -1907,10 +1969,14 @@ document.getElementById("imp_commitBtn").addEventListener("click", async () => {
       year: IMPORT_PREVIEW.year,
       budget_type: IMPORT_PREVIEW.budget_type,
       source_label: document.getElementById("imp_file").files[0]?.name || "budget import",
+      fields,
+      supplemental_number: supplementalNumber,
+      fund_sources: isSupp ? IMPORT_PREVIEW.fund_sources : [],
       offices,
     });
     const createdNote = result.offices_created ? ` (${result.offices_created} of those are newly-created offices — add a user account for each under the Users tab.)` : "";
-    statusEl.textContent = `Done — updated ${result.offices_updated} office(s), wrote ${result.lines_written} line amount(s), and added ${result.accounts_created} new account(s) to the chart of accounts.${createdNote}`;
+    statusEl.textContent = `Done — updated ${result.offices_updated} office(s), wrote ${result.lines_written} line amount(s), and added ${result.accounts_created} new account(s) to the chart of accounts.` +
+      (result.fund_sources_written ? ` Saved ${result.fund_sources_written} funding source item(s) for this supplemental.` : "") + createdNote;
     statusEl.className = "status-msg ok";
   } catch (err) {
     statusEl.textContent = err.message;
